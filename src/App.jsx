@@ -204,10 +204,14 @@ function MainScreen({ groqKey, claudeKey, initCtx }) {
     const r = await fetch(CLAUDE_API, {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt})
+      body:JSON.stringify({
+        model:"claude-sonnet-4-20250514",
+        max_tokens:1000,
+        messages:[{role:"user",content:prompt}]
+      })
     });
     const d = await r.json();
-    return d.content?.map(c=>c.text||"").join("")||d.result||d.text||"";
+    return d.content?.map(c=>c.text||"").join("")||"";
   }
 
   async function buildSchedule(ctx) {
@@ -245,10 +249,13 @@ Return ONLY raw JSON array, no markdown.
       const r = await fetch(GROQ_API, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({messages:[{role:"system",content:COACH},{role:"user",content:`Schedule: ${ctx}\nUser: ${msg}`}]})
+        body:JSON.stringify({
+          system: COACH,
+          message: `Schedule: ${ctx}\nUser: ${msg}`
+        })
       });
       const d=await r.json();
-      const raw=d.choices?.[0]?.message?.content||d.result||"Error.";
+      const raw=d.content||"Error.";
       if(raw.includes("REBUILD_NEEDED")){
         setMessages(m=>[...m,{role:"ai",text:"Rebuilding your day…"}]);
         setLoading(false); await rebuild(); return;
