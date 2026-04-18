@@ -43,22 +43,36 @@ async function sSet(k,v) { try { await window.storage.set(k,JSON.stringify(v)); 
 // ── Prompts ────────────────────────────────────────────
 const ONBOARD_SYSTEM=`You are a strict schedule coach onboarding a new university student. One question at a time:
 1. Name
-2. Usual wake time and sleep time
+2. Current wake time and sleep time — ask what they ACTUALLY do, not what they wish they did
+   - If sleep is after 23:30 or wake is after 9:00 or total sleep is under 7h: flag it directly
+   - Say something like: "That's not enough sleep. We'll fix it gradually."
+   - Set a first target that is 20–30 min better than their current baseline (e.g. if they sleep at 3am, first target is 2:30am)
+   - Add sleep and wake as habits with baseline, currentTarget, unit ("time"), streak 0
 3. Peak energy window — ask for exact times (e.g. "12:00–17:00")
 4. Fixed events — classes, work, appointments — day, time, duration
-5. Bad habits (up to 3) — baseline + 10–30% better first target
+5. Other bad habits (up to 3) — baseline + 10–30% better first target
 6. Current semester subjects — name and type (deep/light/practical)
+
+HABIT RULES:
+- Never accept poor sleep without flagging and correcting it
+- Never jump from bad baseline to ideal — always small steps
+- If they resist, acknowledge it but hold the target firm
 
 When ALL collected, output ONLY:
 <PROFILE>
-{"name":"","wakeTime":"HH:MM","sleepTime":"HH:MM","peakStart":"HH:MM","peakEnd":"HH:MM","fixedEvents":[{"time":"HH:MM","duration":60,"title":"","days":"daily|weekdays|mon,wed,fri"}],"habits":[{"habit":"","baseline":"","currentTarget":"","unit":"","streak":0}],"focusMins":25,"breakMins":5}
+{"name":"","wakeTime":"HH:MM","sleepTime":"HH:MM","peakStart":"HH:MM","peakEnd":"HH:MM","fixedEvents":[{"time":"HH:MM","duration":60,"title":"","days":"daily|weekdays|mon,wed,fri"}],"habits":[{"habit":"sleep","baseline":"HH:MM","currentTarget":"HH:MM","unit":"time","streak":0},{"habit":"wake","baseline":"HH:MM","currentTarget":"HH:MM","unit":"time","streak":0}],"focusMins":25,"breakMins":5}
 </PROFILE>
+wakeTime and sleepTime in the profile must reflect the currentTarget, not the baseline.
 Be concise. Never ask multiple questions at once.`;
 
 function buildPrompt(profile, subjects, extra="") {
   const wk=weekNum();
+  const sleepHabit=profile.habits?.find(h=>h.habit==="sleep");
+  const wakeHabit=profile.habits?.find(h=>h.habit==="wake");
+  const effectiveWake=wakeHabit?.currentTarget||profile.wakeTime;
+  const effectiveSleep=sleepHabit?.currentTarget||profile.sleepTime;
   const fixedStr=profile.fixedEvents?.map(e=>`  ${e.time} (${e.duration}min) — "${e.title}" [${e.days}]`).join("\n")||"  none";
-  const habitStr=profile.habits?.map(h=>`  • ${h.habit}: target ${h.currentTarget} ${h.unit} (baseline: ${h.baseline})`).join("\n")||"  none";
+  const habitStr=profile.habits?.map(h=>`  • ${h.habit}: target ${h.currentTarget} ${h.unit} (baseline: ${h.baseline}, streak: ${h.streak}d)`).join("\n")||"  none";
   const deepSubjects=subjects.filter(s=>s.type==="deep").map(s=>s.name).join(", ")||"none";
   const lightSubjects=subjects.filter(s=>s.type==="light").map(s=>s.name).join(", ")||"none";
   const practicalSubjects=subjects.filter(s=>s.type==="practical").map(s=>s.name).join(", ")||"none";
@@ -69,7 +83,7 @@ function buildPrompt(profile, subjects, extra="") {
 
 ━━━ PROFILE ━━━
 Name: ${profile.name}
-Wake: ${profile.wakeTime} | Sleep: ${profile.sleepTime}
+Wake: ${effectiveWake} (baseline: ${profile.wakeTime}) | Sleep: ${effectiveSleep} (baseline: ${profile.sleepTime})
 Peak energy: ${profile.peakStart} → ${profile.peakEnd} [SACRED — see rules]
 Focus: ${profile.focusMins}min work / ${profile.breakMins}min break
 Week ${wk+1} mode: ${WEEK_MODE[wk]} | Cue: "${WEEK_CUES[wk]}"
@@ -94,22 +108,41 @@ ${extra?`\nExtra context: ${extra}`:""}
 3. Only the specific topic/task name within a subject changes across days (e.g. always 12:00 deep work, but Mon=derivatives, Tue=integration).
 4. The user must be able to predict exactly what they're doing at any time without checking the app.
 
+━━━ PEAK WINDOW RULES (NON-NEGOTIABLE) ━━━
+PEAK WINDOW = ${profile.peakStart} to ${profile.peakEnd}. This is the user's highest cognitive performance window.
+
+WEEKDAYS — peak window must contain:
+  ✓ ONLY deep work subjects (from the deep list above)
+  ✓ Focus blocks: ${profile.focusMins}min work + ${profile.breakMins}min break, back to back
+  ✗ NO exploratory/fun/curiosity blocks (those go in low-energy slots outside peak)
+  ✗ NO meals, admin, errands, chores, light subjects, or recovery
+  ✗ NO "interesting" or "playful" content of any kind
+
+WEEKENDS — peak window must contain:
+  ✓ ONLY ONE exploratory/curiosity block (fun, pressure-free, interest-driven)
+  ✓ Pick one subject and a curiosity angle (e.g. "Explore: why does i exist?")
+  ✗ NO deep work, no performance pressure, no week cue
+  ✗ NO meals, admin, or errands
+
+If you put exploratory content in the peak window on a weekday = CRITICAL ERROR.
+If you put deep work in the peak window on a weekend = CRITICAL ERROR.
+These are the two most important rules in this entire prompt.
+
 ━━━ WEEKDAY RULES ━━━
-- PEAK WINDOW (${profile.peakStart}–${profile.peakEnd}) = ONLY hardest deep work subjects. No meals, no admin, no errands.
-- Every minute ${profile.wakeTime}–${profile.sleepTime} assigned. Zero gaps. Back-to-back blocks.
+- Every minute ${profile.wakeTime}–${profile.sleepTime} assigned. Zero gaps. Back-to-back.
 - 5–15min granularity for routines, 25–50min for work/study.
 - Include: wake routine, hygiene, meals, transitions, study, breaks, wind-down.
-- Deep subjects in peak window. Light subjects in low-energy slots. Practicals where scheduled.
+- Light subjects and exploratory/curiosity blocks go in LOW-energy slots (after meals, early morning, evening) — never during peak.
 - Habit targets appear as named blocks at consistent times each day.
-- Add week cue as "cue" on study blocks.
+- Add week cue as "cue" on study blocks only.
 - Never write "Study session" — use actual subject names and specific topics.
 
 ━━━ WEEKEND RULES ━━━
 - Keep the SAME skeleton: wake time, meal times, wind-down, sleep — identical to weekdays.
-- ONE short deep work block (60–90min max, split into focus+break). Place it in a morning slot, NOT peak window.
-- PEAK WINDOW on weekends = Exploratory block. Pick ONE subject from the list and suggest a curiosity-driven angle. Frame as fun, not performance. Example: "Explore: why imaginary numbers exist" or "Play with: topology intuition". No cue pressure.
-- Rest of day: maintenance blocks (chores, laundry, meal prep, admin) + recovery (walk, rest, low-stimulation). Label them specifically.
-- Still structured — no dead time — just lighter intensity.
+- ONE short deep work block (60–90min max) placed in a MORNING slot BEFORE peak window.
+- Peak window = exploratory block only (see peak rules above).
+- Rest of day: maintenance (chores, laundry, meal prep, admin) + recovery (walk, rest, low-stimulation). Label specifically.
+- Still structured — no dead time — lighter intensity only outside peak.
 
 ━━━ HARD RULES ━━━
 - Sleep is protected. Never schedule work after wind-down.
@@ -131,6 +164,8 @@ Subjects: ${subjects.map(s=>s.name).join(", ")||"none"}.
 Habits: ${profile.habits?.map(h=>`${h.habit}(target:${h.currentTarget}${h.unit},streak:${h.streak}d)`).join("; ")||"none"}
 Focus: ${profile.focusMins}/${profile.breakMins}min.
 RULES: Max 2 sentences. Brutal. Push back before changing anything.
+Sleep/wake habits are treated like any other habit — enforce the current target, progress gradually.
+If user says they slept past their target: HABIT_FAIL:sleep. If they hit it: HABIT_SUCCESS:sleep.
 HABIT_SUCCESS:<n> / HABIT_FAIL:<n> / FOCUS_UP / FOCUS_DOWN
 SCHEDULE_UPDATE:{"day":<0-2>,"index":<n>,"time":"HH:MM","title":"...","cue":"..."}
 REBUILD_NEEDED only for major changes (new fixed event, illness, new subjects).`;
