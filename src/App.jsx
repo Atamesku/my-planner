@@ -52,17 +52,19 @@ const ONBOARD_SYSTEM=`You are a strict schedule coach onboarding a new universit
 4. Fixed events — classes, work, appointments — day, time, duration
 5. Other bad habits (up to 3) — baseline + 10–30% better first target
 6. Current semester subjects — name and type (deep/light/practical)
-
-HABIT RULES:
-- Never accept poor sleep without flagging and correcting it
-- Never jump from bad baseline to ideal — always small steps
-- If they resist, acknowledge it but hold the target firm
+7. Hobbies and outside interests:
+   - Ask what they currently do for fun or what they'd like to learn outside of university
+   - If they have hobbies: assess if each one is realistic given their schedule (time-intensive vs low-effort)
+   - If they have no hobbies or seem unsure: suggest 2–3 options that match their personality and schedule
+     (e.g. if they study maths heavily → suggest chess, music, or a physical sport for balance)
+   - For each hobby: assign a frequency (daily/2x week/weekend) and rough duration (15–60min)
+   - Hobbies are NOT optional fillers — they are scheduled blocks just like study
 
 When ALL collected, output ONLY:
 <PROFILE>
-{"name":"","wakeTime":"HH:MM","sleepTime":"HH:MM","peakStart":"HH:MM","peakEnd":"HH:MM","fixedEvents":[{"time":"HH:MM","duration":60,"title":"","days":"daily|weekdays|mon,wed,fri"}],"habits":[{"habit":"sleep","baseline":"HH:MM","currentTarget":"HH:MM","unit":"time","streak":0},{"habit":"wake","baseline":"HH:MM","currentTarget":"HH:MM","unit":"time","streak":0}],"focusMins":25,"breakMins":5}
+{"name":"","wakeTime":"HH:MM","sleepTime":"HH:MM","peakStart":"HH:MM","peakEnd":"HH:MM","fixedEvents":[{"time":"HH:MM","duration":60,"title":"","days":"daily|weekdays|mon,wed,fri"}],"habits":[{"habit":"sleep","baseline":"HH:MM","currentTarget":"HH:MM","unit":"time","streak":0},{"habit":"wake","baseline":"HH:MM","currentTarget":"HH:MM","unit":"time","streak":0}],"hobbies":[{"name":"","duration":30,"frequency":"daily|2x week|weekend","type":"active|creative|social|cognitive"}],"focusMins":25,"breakMins":5}
 </PROFILE>
-wakeTime and sleepTime in the profile must reflect the currentTarget, not the baseline.
+wakeTime and sleepTime must reflect currentTarget, not baseline.
 Be concise. Never ask multiple questions at once.`;
 
 function buildPrompt(profile, subjects, extra="") {
@@ -77,7 +79,7 @@ function buildPrompt(profile, subjects, extra="") {
   const lightSubjects=subjects.filter(s=>s.type==="light").map(s=>s.name).join(", ")||"none";
   const practicalSubjects=subjects.filter(s=>s.type==="practical").map(s=>s.name).join(", ")||"none";
   const allSubjects=subjects.map(s=>s.name).join(", ")||"none";
-  const dayInfos=[0,1,2].map(i=>`Day${i+1}: ${getDayName(i)} (${isWeekend(i)?"WEEKEND":"WEEKDAY"})`).join(", ");
+  const hobbyStr=profile.hobbies?.map(h=>`  • ${h.name} — ${h.duration}min, ${h.frequency} (${h.type})`).join("\n")||"  none";
 
   return `You are building a HYPER-PERSONALISED 3-day schedule for ${profile.name}, a university student.
 
@@ -534,7 +536,7 @@ function MainScreen({ profile: initP, subjects: initS }) {
       {tab==="Schedule"&&<DayTabs active={activeDay} setActive={setActiveDay}/>}
       {tab==="Schedule"&&<ScheduleList blocks={days[activeDay]} activeDay={activeDay} profile={profile}/>}
       {tab==="Events"&&<EventsTab profile={profile} onUpdate={p=>saveProfile(p)}/>}
-      {tab==="Subjects"&&<SubjectsTab subjects={subjects} onUpdate={s=>saveSubjects(s)}/>}
+      {tab==="Subjects"&&<SubjectsTab subjects={subjects} onUpdate={s=>saveSubjects(s)} profile={profile} onUpdateProfile={p=>saveProfile(p)}/>}
       <ChatFeed messages={messages} loading={loading} feedRef={feedRef}/>
       <BottomNav tab={tab} setTab={setTab}/>
       <InputBar value={input} onChange={setInput} onSend={send} onRebuild={()=>buildDays()} disabled={loading} rebuilding={rebuilding}/>
