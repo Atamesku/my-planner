@@ -134,12 +134,17 @@ function detectPatterns(logs) {
 
 // ── Components ─────────────────────────────────────────
 function Header({ mode }) {
+  const [now,setNow]=useState(timeStr());
+  useEffect(()=>{ const t=setInterval(()=>setNow(timeStr()),1000); return()=>clearInterval(t); },[]);
   const modeLabel={ morning:"Morning — Plan your day", executing:"Executing", audit:"Evening Audit" };
   const modeColor={ morning:"#2a2a00", executing:"#001a00", audit:"#1a001a" };
   return (
-    <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #141414",background:modeColor[mode]}}>
-      <div style={{color:"#444",fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>{dateStr()}</div>
-      <div style={{color:"#666",fontSize:11,letterSpacing:1,marginTop:3}}>{modeLabel[mode]}</div>
+    <div style={{padding:"14px 18px 10px",borderBottom:"1px solid #141414",background:modeColor[mode],display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div>
+        <div style={{color:"#444",fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>{dateStr()}</div>
+        <div style={{color:"#666",fontSize:11,letterSpacing:1,marginTop:3}}>{modeLabel[mode]}</div>
+      </div>
+      <div style={{color:"#555",fontSize:18,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{now}</div>
     </div>
   );
 }
