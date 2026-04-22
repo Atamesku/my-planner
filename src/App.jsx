@@ -21,10 +21,38 @@ function getCurIdx(blocks) {
   return idx;
 }
 
-// ── Storage ────────────────────────────────────────────
+// ── Storage (Supabase via ai_memory table) ─────────────
 const SK={ profile:"v11_profile", schedule:"v11_schedule", auditLog:"v11_auditlog" };
-async function sGet(k) { try { const r=await window.storage.get(k); return r?JSON.parse(r.value):null; } catch { return null; } }
-async function sSet(k,v) { try { await window.storage.set(k,JSON.stringify(v)); } catch(e) { console.error(e); } }
+
+const supabaseUrl = 'https://qlectmatqxtqqpwwbrhn.supabase.co'
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsZWN0bWF0cXh0cXFwd3dicmhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MTUzNjgsImV4cCI6MjA5MDM5MTM2OH0.x98eVDFBeBkVCvQhoJg01sGy30BFB3B7Jcn8cJrU4Qg'
+const USER_ID = 'default'
+
+async function sbFetch(path, opts={}) {
+  const r = await fetch(`${supabaseUrl}${path}`, {
+    ...opts,
+    headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation', ...(opts.headers||{}) }
+  });
+  return r.ok ? r.json() : null;
+}
+
+async function sGet(key) {
+  try {
+    const data = await sbFetch(`/rest/v1/ai_memory?user_id=eq.${USER_ID}&key=eq.${key}&select=value`);
+    if (data?.length) return JSON.parse(data[0].value);
+    return null;
+  } catch { return null; }
+}
+
+async function sSet(key, value) {
+  try {
+    await sbFetch(`/rest/v1/ai_memory`, {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({ user_id: USER_ID, key, value: JSON.stringify(value), updated_at: new Date().toISOString() })
+    });
+  } catch(e) { console.error('sSet error:', e); }
+}
 
 // ── The Floor ──────────────────────────────────────────
 const FLOOR = `NON-NEGOTIABLE FLOOR: Every day must include at least one period of real mathematical thinking — active problem-solving, not passive review. This cannot be removed, shortened below 25 minutes, or replaced with reading/watching. If the user's constraints make this impossible, push back before finalising the schedule.`;
