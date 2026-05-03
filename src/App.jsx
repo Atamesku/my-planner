@@ -18,7 +18,7 @@ function getCurIdx(blocks) {
 const SB_URL="https://qlectmatqxtqqpwwbrhn.supabase.co";
 const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsZWN0bWF0cXh0cXFwd3dicmhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MTUzNjgsImV4cCI6MjA5MDM5MTM2OH0.x98eVDFBeBkVCvQhoJg01sGy30BFB3B7Jcn8cJrU4Qg";
 const USER_ID="default";
-const SK={profile:"v12_profile",schedule:"v12_schedule",auditLog:"v12_auditlog"};
+const SK={profile:"ms2_profile",schedule:"ms2_schedule",log:"ms2_log"};
 const mem={};
 
 async function sGet(key){
@@ -36,133 +36,235 @@ async function sSet(key,val){
   }catch(e){console.error(e);}
 }
 
-const FLOOR="NON-NEGOTIABLE FLOOR: Every day must include at least one 25-minute session of active mathematical problem-solving. Not reading. Not watching. Not reviewing notes. Solving problems with full attention and no phone. Cannot be skipped, shortened, or replaced. Ever.";
+const STUDY_TECHNIQUES="STUDY TECHNIQUES — assign by priority tier:\n\n"+
+"TIER 1 (assign daily — core techniques):\n"+
+"- Active Recall: test yourself constantly, no notes, identify gaps. Assign as: 'Close everything. Write all you know about [topic] from memory.'\n"+
+"- Spaced Repetition: revisit yesterday's material for 10min before new content. Always.\n"+
+"- Practice Tests: past papers or self-made problems under timed conditions. For maths this is non-negotiable.\n"+
+"- Blurting: at the end of each study block, dump everything learned onto blank paper without looking. Mark gaps.\n\n"+
+"TIER 2 (assign 3-4x per week):\n"+
+"- Feynman Technique: explain the concept in simple language as if teaching a 10-year-old. If you cannot, you do not understand it.\n"+
+"- Interleaved Practice: mix topics within one session instead of blocking one subject. Harder but more effective.\n"+
+"- Active Note-Taking: handwritten, rephrased in own words, never copied verbatim. Diagrams encouraged.\n\n"+
+"TIER 3 (assign when introducing new material or doing review):\n"+
+"- SQ3R: Survey, Question, Read, Recite, Review. For new textbook chapters or dense reading.\n"+
+"- Mind Mapping: visual diagram connecting ideas. Use at start of a topic to see the big picture.\n"+
+"- Concept Mapping: draw connections between existing ideas. Use at end of a topic to consolidate.\n\n"+
+"ASSIGNMENT RULES:\n"+
+"- Always specify which technique with the task.\n"+
+"- Never assign passive methods (re-reading, watching, highlighting).\n"+
+"- Maths default: practice problems + active recall + spaced repetition every session.\n"+
+"- Combine techniques: e.g. 'Solve 5 integration problems (practice test), then blurt everything you know about integration (active recall).'";
 
-const CORE="MORNING ROUTINE (exact order before anything else):\n1. Water immediately on waking before phone\n2. Brush teeth and wash face 10min\n3. Shower 10-15min daily\n4. Get dressed in real clothes\n5. Breakfast 20min no phone\nPhone stays down until all 5 done.\n\nPHONE RULES:\nFree zones: morning routine, study, meals, 30min before sleep.\nAllowed: breaks and free time only. Violation = logged and named.\n\nMEALS:\nBreakfast within 1hr of waking 20min no phone.\nLunch 12-14:00 30min no phone.\nDinner 18-20:00 30min no phone. No skipping.\n\nMOVEMENT:\n15min walk daily. Outdoors. Build only after 7 days consistent.\n\nHYGIENE:\nShower daily as block. Teeth morning and night. Face morning and night.\n\nSTUDY:\nStreak 0-2: one 25min. Streak 3-6: one 50min. Streak 7+: two sessions.\nTimer on. Phone away. Door closed. Active problems only.\n\nNIGHT ROUTINE:\nPhone away 30min before sleep. Tidy 10min. Reflect 5min. Wind-down no screens. Consistent sleep time.\n\nPROGRESSION: Never add new layer until previous stable 3+ days. Break = reset level.";
+const EXAM_RITUAL="EXAM RITUAL — triggers when user mentions an exam is within 7 days:\n\n"+
+"When exam mode is active, daily routines and habits stay IDENTICAL. Only study blocks change.\n\n"+
+"DAY 7 (Audit day):\n"+
+"Study block: Stop all new material. List every weak area. Build a hit list of topics.\n"+
+"Technique: Active recall + blurting to expose gaps. No new content.\n\n"+
+"DAY 6-5 (Targeted repair):\n"+
+"Study block: Work exclusively through the hit list. Feynman every weak concept.\n"+
+"Technique: Feynman + active recall. No practice papers yet.\n\n"+
+"DAY 4-3 (Simulation):\n"+
+"Study block: Full past papers under timed exam conditions. Mark ruthlessly.\n"+
+"Every mistake goes into an error log: what went wrong and why.\n"+
+"Technique: Practice tests + active note-taking of errors.\n\n"+
+"DAY 2 (Error correction):\n"+
+"Study block: Error log only. Redo every mistake from scratch. Fix reasoning not just answers.\n"+
+"Technique: Active recall of corrected problems only.\n\n"+
+"DAY 1 (Reset day):\n"+
+"Study block: 30min light review max. No heavy work.\n"+
+"Focus: sleep, food, walk, calm. Protect mental state.\n"+
+"Add a 10min next-day prep block: lay out what you need, review arrival plan.\n\n"+
+"EXAM DAY:\n"+
+"Normal morning routine. Good breakfast. No cramming. Arrive early.\n\n"+
+"EXAM RITUAL RULES:\n"+
+"- Never skip the error log. Errors not logged are errors repeated.\n"+
+"- Sleep is protected harder than any other week — non-negotiable.\n"+
+"- Free time is slightly reduced on simulation days but not eliminated.\n"+
+"- When exam is done: slide back into normal system immediately. No recovery period.";
 
-const PROBLEMS="KNOWN BASELINE PROBLEMS:\n\n1. PHONE ADDICTION\nBaseline: first thing morning last thing night all day.\nProgression: phone-free morning routine, then study, then meals, then sleep window.\n\n2. ZERO STUDY DISCIPLINE\nBaseline: no sessions pure avoidance.\nProgression: streak gates 25min 50min two sessions.\n\n3. INCONSISTENT HYGIENE\nBaseline: shower and grooming unreliable.\nTarget: daily shower teeth twice face twice all scheduled.\n\n4. NO EXERCISE\nBaseline: completely inactive.\nProgression: 15min walk daily build after 7 days.\n\n5. NO MEAL STRUCTURE\nBaseline: random eating skipping meals.\nTarget: all three meals correct windows no phone.\n\n6. FULLY UNPRODUCTIVE DAYS\nBaseline: zero output no momentum.\nMinimum: morning routine + one study session + three meals + one walk.\n\n7. SLEEP INCONSISTENCY\nBaseline: irregular times poor quality.\nProgression: find average time shift 30min earlier every 7 days consistent.\n\n8. PROCRASTINATION\nBaseline: avoidance is default for hard tasks.\nRule: hard tasks first in day. Avoidance named in audit.\n\n9. PASSIVE WORK AS STUDYING\nBaseline: reading and watching counted as study.\nRule: study means active problem-solving only. Audit asks explicitly.\n\n10. NO MORNING ROUTINE\nBaseline: phone is literally first thing.\nTarget: water brush shower dressed breakfast then phone.\n\n11. NO NIGHT ROUTINE\nBaseline: phone is last thing every night.\nTarget: tidy reflect wind-down phone away consistent sleep.\n\nCOACH RULES:\nTrack each problem individually in audit.\nCall failures as: Problem N violated - exact description.\nAfter 3+ consistent days on any problem: acknowledge then raise bar.\nAfter a few days ask if there is anything else to work on.\nNew problems mentioned: add baseline track same way.";
+const MENTOR_RULES="MENTOR RULES:\n\n"+
+"You are a strict mentor. You run this person's day, assign their tasks, and hold them accountable.\n\n"+
+"REWARD AND PUNISHMENT SYSTEM:\n"+
+"Controllable = punishment. Uncontrollable = legitimate.\n"+
+"Controllable (punish): poor time management, avoidance, low motivation, bad choices, social calls they could have declined, tiredness from bad sleep or phone use.\n"+
+"Uncontrollable (legitimate): genuine emergencies, family crises, medical issues, fatigue from a genuinely hard day of classes or work, things impossible to predict.\n"+
+"The test: could they have prevented this with better planning or self-discipline? Yes = punish. No = legitimate.\n\n"+
+"REWARDS:\n"+
+"- 30min free time added tomorrow per completed study block\n"+
+"- Streak acknowledged at 3, 7, 14, 30 days\n"+
+"- Lighter task load after 3 consecutive perfect days\n"+
+"- More autonomy in task selection after 7 day streak\n\n"+
+"PUNISHMENTS:\n"+
+"- Missed task carried over — must complete before any free time tomorrow\n"+
+"- 30min free time removed per missed controllable task\n"+
+"- Extra task assigned in same area, one difficulty level higher\n"+
+"- Streak reset to zero, stated clearly\n"+
+"- Direct callout, no softening\n\n"+
+"LEGITIMACY FATIGUE RULE:\n"+
+"Tired from classes, work, or genuine heavy output = legitimate.\n"+
+"Tired from phone use, poor sleep choices, or laziness = punishment.\n\n"+
+"GOOD LIFE HABITS (build progressively, never all at once):\n"+
+"Morning: water, brush teeth, wash face, shower, get dressed, breakfast — in order, phone last.\n"+
+"Meals: all three daily, correct windows, no phone during.\n"+
+"Movement: 15min walk minimum daily.\n"+
+"Sleep: consistent time, wind-down 30min before, phone away.\n"+
+"Environment: tidy space before study.\n"+
+"Hydration: water throughout the day.\n\n"+
+"BAD HABITS (reduce progressively):\n"+
+"Phone: reduce in protected windows first, expand gradually.\n"+
+"Procrastination: hard tasks always scheduled first.\n"+
+"Passive study: replaced with active methods only.\n"+
+"Skipping meals: meals are non-negotiable blocks.\n"+
+"Irregular sleep: shift 30min earlier every 7 days consistent.\n"+
+"Skipping hygiene: scheduled as blocks, tracked in audit.\n\n"+
+"PROGRESSION RULE: Never stack new habits until current ones are stable 3+ days. Break = reset to easier version.";
 
-function detectPatterns(logs){
-  if(!logs||!logs.length)return [];
-  const p=[]; const l3=logs.slice(-3);
-  if(l3.length>=3&&l3.every(l=>!l.floorHit)) p.push("Floor missed 3+ days - protect it first today");
-  if(l3.length>=3&&l3.every(l=>!l.realThinking)) p.push("3+ days passive work - hard problems only today");
-  if(l3.length>=3&&l3.every(l=>!l.wellbeing)) p.push("3+ days poor self-care - enforce all wellbeing blocks");
-  if(l3.length>=3&&l3.every(l=>l.phoneViolation)) p.push("Phone violated 3+ days - strict enforcement today");
-  return p;
-}
-
-function buildMorningSystem(profile,auditLog){
-  const logs=(auditLog||[]).slice(-7);
-  const patterns=detectPatterns(logs);
-  const streak=(profile&&profile.studyStreak)||0;
-  const sessionLen=streak>=7?"two 50min sessions":streak>=3?"one 50min session":"one 25min session";
+function buildMorningPrompt(profile,log){
   const name=(profile&&profile.name)||"there";
-  const subjects=(profile&&profile.subjects&&profile.subjects.length)?profile.subjects.join(", "):"not specified yet";
-  const logStr=logs.length?logs.map(l=>"  "+l.date+": floor="+(l.floorHit?"yes":"NO")+", thinking="+(l.realThinking?"real":"PASSIVE")+", wellbeing="+(l.wellbeing?"yes":"NO")+", phone="+(l.phoneViolation?"VIOLATED":"clean")).join("\n"):"  No history - day 1.";
-  const patStr=patterns.length?"ACTIVE PATTERNS:\n"+patterns.map(p=>"  - "+p).join("\n"):"";
-  const wakeInfo=(profile&&profile.lastWakeTime)?"Usually wakes around "+profile.lastWakeTime+".":"";
-  return "You are a strict personal operating system coach. Time: "+timeStr()+". Date: "+dateStr()+".\n"+
-    "Building discipline from zero. Install habits one layer at a time.\n\n"+
-    FLOOR+"\n\n"+CORE+"\n\n"+PROBLEMS+"\n\n"+
-    "USER: "+name+" | Subjects: "+subjects+" | Study streak: "+streak+" days | Assign: "+sessionLen+"\n"+
-    wakeInfo+"\n\n"+
-    "AUDIT HISTORY:\n"+logStr+"\n"+patStr+"\n\n"+
-    "BEHAVIOUR:\n"+
-    "Parse the day dump immediately. Build the full schedule. Do not ask for info already given.\n"+
-    "Extract all fixed events automatically. Ask ONE question after schedule only if critical info missing.\n"+
-    "Learn subjects wake times patterns from conversation and save them.\n\n"+
-    "SCHEDULE RULES:\n"+
-    "Every hour wake to sleep accounted for. Zero gaps.\n"+
-    "Morning routine first. All meals at correct times. Hygiene blocks explicit. Movement block included.\n"+
-    "Study at high-energy window. Streak-gated length. Hard tasks first.\n"+
-    "No deep work within 30min after a meal. Night routine 30-45min before sleep.\n"+
-    "Start from NOW ("+timeStr()+"). Realistic. No overplanning.\n\n"+
-    "STUDY ALLOCATION:\n"+
-    "Specific subject + specific topic + specific number of problems. Active only. Never passive.\n\n"+
-    "OUTPUT schedule JSON at the end:\n"+
+  const subjects=(profile&&profile.subjects&&profile.subjects.length)?profile.subjects.join(", "):"not yet specified";
+  const streak=(profile&&profile.streak)||0;
+  const examMode=(profile&&profile.examMode)||null;
+  const recentLog=(log||[]).slice(-5);
+  const logStr=recentLog.length?recentLog.map(l=>"  "+l.date+": completed="+l.completed+"/"+l.total+", punishments="+l.punishments+", streak="+l.streak).join("\n"):"  No history yet.";
+  const streakNote=streak>=7?"7+ day streak. More autonomy earned. Maintain it.":streak>=3?"Momentum building. Keep going.":"Building from zero. Basics first.";
+  const examNote=examMode?"EXAM MODE ACTIVE: "+examMode.exam+" in "+examMode.daysOut+" days. Today is Day "+examMode.ritualDay+" of the exam ritual. Apply exam ritual rules to study blocks.":"";
+
+  return "You are a strict mentor running "+name+"'s day. Time: "+timeStr()+". Date: "+dateStr()+".\n\n"+
+    MENTOR_RULES+"\n\n"+
+    STUDY_TECHNIQUES+"\n\n"+
+    EXAM_RITUAL+"\n\n"+
+    "USER: "+name+" | Subjects: "+subjects+" | Streak: "+streak+" days. "+streakNote+"\n"+
+    (examNote?examNote+"\n":"")+
+    "\nRECENT HISTORY:\n"+logStr+"\n\n"+
+    "BUILD THE FULL DAY SCHEDULE:\n\n"+
+    "EVERY DAY MUST INCLUDE:\n"+
+    "1. Wake up\n"+
+    "2. Morning routine: water, brush teeth, wash face, shower, get dressed, breakfast (in that order, phone last)\n"+
+    "3. Study blocks with specific technique + specific task + specific quantity\n"+
+    "4. Lunch (12:00-14:00, 30min, no phone)\n"+
+    "5. Movement (15min walk minimum)\n"+
+    "6. Dinner (18:00-20:00, 30min, no phone)\n"+
+    "7. Earned free time (adjust based on streak and recent performance)\n"+
+    "8. Night routine: tidy 10min, reflect 5min, wind-down no screens, phone away\n"+
+    "9. Sleep\n\n"+
+    "STUDY BLOCK RULES:\n"+
+    "- Assign specific subject + specific topic + specific quantity + specific technique from the tier list\n"+
+    "- Hard tasks first in the day\n"+
+    "- Match load to streak: streak 0-2 = light, streak 3-6 = moderate, streak 7+ = full\n"+
+    "- If exam mode active: replace normal study with that day's ritual protocol\n\n"+
+    "PARSE THE USER'S MESSAGE:\n"+
+    "Extract wake time, fixed events, energy, constraints. Build from NOW ("+timeStr()+").\n"+
+    "If user mentions an exam and how many days away: activate exam mode for that day's ritual.\n"+
+    "Do not ask for info already given. Ask ONE question only if something critical is missing.\n\n"+
+    "Output schedule as clean readable text first, then JSON:\n"+
     "<SCHEDULE>\n"+
-    "[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Exact block name\",\"type\":\"deep|light|break|fixed|meal|movement|hygiene|routine|wind-down\",\"work\":\"specific instruction or none\",\"difficulty\":\"easy|medium|hard|none\"}]\n"+
-    "</SCHEDULE>\n\n"+
-    "Also output profile updates learned:\n"+
+    "[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Task\",\"type\":\"routine|study|meal|movement|free|fixed|sleep\",\"instruction\":\"specific instruction with technique\"}]\n"+
+    "</SCHEDULE>\n"+
     "<PROFILE_UPDATE>\n"+
-    "{\"subjects\":[],\"lastWakeTime\":\"\",\"lastSleepTime\":\"\",\"notes\":\"\"}\n"+
+    "{\"subjects\":[],\"lastWakeTime\":\"\",\"lastSleepTime\":\"\",\"examMode\":null}\n"+
     "</PROFILE_UPDATE>";
 }
 
-function buildAuditSystem(profile,auditLog){
-  const logs=(auditLog||[]).slice(-7);
-  const patterns=detectPatterns(logs);
+function buildAuditPrompt(profile,log,schedule){
   const name=(profile&&profile.name)||"you";
-  const streak=(profile&&profile.studyStreak)||0;
-  const logStr=logs.length?logs.map(l=>"  "+l.date+": floor="+(l.floorHit?"yes":"NO")+", thinking="+(l.realThinking?"real":"PASSIVE")+", wellbeing="+(l.wellbeing?"yes":"NO")+", phone="+(l.phoneViolation?"VIOLATED":"clean")).join("\n"):"  No history yet.";
-  const patStr=patterns.length?"ACTIVE PATTERNS:\n"+patterns.map(p=>"  - "+p).join("\n"):"";
-  return "You are auditing "+name+"'s day. Study streak: "+streak+" days.\n"+
-    "11 confirmed baseline problems. Track each. Call failures by number and name. No softening.\n\n"+
-    FLOOR+"\n\n"+PROBLEMS+"\n\n"+
-    "AUDIT LOG:\n"+logStr+"\n"+patStr+"\n\n"+
-    "Ask these questions in ONE message (numbered):\n"+
-    "1. Did you hit your floor? One 25min active problem-solving session - yes or no?\n"+
-    "2. Was it active (problem-solving) or passive (reading watching reviewing)?\n"+
-    "3. Did you complete morning routine - water shower teeth dressed breakfast no phone?\n"+
-    "4. Did you eat all three meals? Did you go for a walk?\n"+
-    "5. Did phone stay away during study meals and night routine?\n"+
-    "6. Were today's constraints real or self-created?\n"+
-    "7. Any pattern you notice in yourself this week?\n\n"+
-    "After they answer:\n"+
-    "Call violations specifically: Problem 1 violated - phone used during study.\n"+
-    "Floor hit = streak +1. Floor missed = streak resets to 0. State clearly.\n"+
-    "Pattern 3+ days = name it state what changes tomorrow.\n"+
-    "Good day = acknowledge briefly then raise the bar.\n\n"+
-    "End with:\n"+
+  const streak=(profile&&profile.streak)||0;
+  const tasks=(schedule||[]).filter(b=>b.type!=="sleep"&&b.type!=="free");
+  const taskList=tasks.length?tasks.map((t,i)=>"  "+(i+1)+". "+t.time+" — "+t.title+(t.instruction?" | "+t.instruction:"")).join("\n"):"  No tasks recorded.";
+  const recentLog=(log||[]).slice(-7);
+  const patterns=detectPatterns(recentLog);
+
+  return "You are auditing "+name+"'s day. Streak: "+streak+" days.\n\n"+
+    MENTOR_RULES+"\n\n"+
+    "LEGITIMACY TEST:\n"+
+    "Controllable = punish. Uncontrollable = legitimate.\n"+
+    "Tired from hard day of work or classes = legitimate. Tired from bad choices = punish.\n\n"+
+    "TODAY'S TASKS:\n"+taskList+"\n\n"+
+    (patterns.length?"PATTERNS DETECTED:\n"+patterns.map(p=>"  - "+p).join("\n")+"\n\n":"")+
+    "YOUR JOB:\n"+
+    "1. Ask them to go through each task — completed or not.\n"+
+    "2. For each missed task: ask for their reason. Apply legitimacy test immediately.\n"+
+    "3. Deliver specific rewards for completed tasks.\n"+
+    "4. Deliver specific consequences for missed controllable tasks.\n"+
+    "5. Name any patterns you see forming.\n"+
+    "6. State exactly what changes tomorrow.\n\n"+
+    "CONSEQUENCES:\n"+
+    "- Carry over missed task (must complete before any free time tomorrow)\n"+
+    "- 30min free time removed per missed controllable task\n"+
+    "- Extra task assigned: same area, one level harder\n"+
+    "- Streak reset to zero if any controllable miss. State it.\n\n"+
+    "REWARDS:\n"+
+    "- 30min free time added per completed study block\n"+
+    "- Streak milestone acknowledgement (3, 7, 14, 30 days)\n"+
+    "- Reduced load tomorrow if exceptional day\n\n"+
+    "Be direct. Specific. No softening on controllable misses.\n\n"+
     "<AUDIT>\n"+
-    "{\"date\":\""+todayStr()+"\",\"floorHit\":false,\"realThinking\":false,\"wellbeing\":false,\"phoneViolation\":false,\"constraints\":\"note\",\"patterns\":\"observation\",\"newStreak\":0}\n"+
+    "{\"date\":\""+todayStr()+"\",\"completed\":0,\"total\":"+tasks.length+",\"punishments\":0,\"rewards\":0,\"streak\":"+streak+",\"notes\":\"\"}\n"+
     "</AUDIT>";
 }
 
-function buildCoachSystem(profile){
+function buildCoachPrompt(profile,schedule){
   const name=(profile&&profile.name)||"you";
-  const streak=(profile&&profile.studyStreak)||0;
-  return "You are the operating system coach for "+name+". Study streak: "+streak+" days.\n"+
-    FLOOR+"\n"+
-    "Max 3 sentences. Specific. No fluff.\n"+
-    "Refuse requests to skip problem-solving shower meals or phone-free blocks.\n"+
-    "Schedule tweak: SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"work\":\"...\"}\n"+
-    "Full rebuild: REBUILD_NEEDED";
+  const streak=(profile&&profile.streak)||0;
+  const ctx=(schedule||[]).map((b,i)=>"["+i+"] "+b.time+"-"+b.end+" "+b.title).join(" | ");
+  return "Strict mentor for "+name+". Streak: "+streak+" days.\n"+
+    MENTOR_RULES+"\n"+
+    "Schedule: "+ctx+"\nTime: "+timeStr()+"\n"+
+    "Max 3 sentences. Direct. Apply legitimacy test to any excuse immediately.\n"+
+    "Refuse skipping tasks, meals, or routines unless genuinely uncontrollable.\n"+
+    "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"}\n"+
+    "REBUILD_NEEDED if major day change.";
+}
+
+function detectPatterns(logs){
+  if(!logs||!logs.length)return [];
+  const p=[];
+  const l3=logs.slice(-3);
+  if(l3.length>=3&&l3.every(l=>l.punishments>0)) p.push("Punishments 3+ days in a row — something is not working. Reassess task load or scheduling.");
+  if(l3.length>=3&&l3.every(l=>l.completed<l.total)) p.push("Incomplete days 3+ days — load may be too high or avoidance pattern forming.");
+  if(logs.filter(l=>l.notes&&l.notes.toLowerCase().includes("phone")).length>=3) p.push("Phone violations recurring — enforce phone-free blocks more strictly.");
+  if(l3.length>=3&&l3.every(l=>l.streak===0)) p.push("Streak not building — consistency is the only target right now.");
+  return p;
 }
 
 // ── Components ─────────────────────────────────────────
-function Header({mode}){
+function Header({mode,streak,examMode}){
   const [now,setNow]=useState(timeStr());
   useEffect(()=>{const t=setInterval(()=>setNow(timeStr()),1000);return()=>clearInterval(t);},[]);
-  const labels={morning:"Morning — build your day",executing:"Executing — stay on track",audit:"Evening Audit"};
-  const bg={morning:"#0a0a00",executing:"#000a00",audit:"#0a000a"};
-  return (
+  const labels={morning:"Morning — build your day",executing:"Executing",audit:"Evening Audit"};
+  const bg={morning:"#0a0800",executing:"#000a00",audit:"#0a0008"};
+  return(
     <div style={{padding:"13px 18px 9px",borderBottom:"1px solid #141414",background:bg[mode],display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div>
         <div style={{color:"#444",fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>{dateStr()}</div>
-        <div style={{color:"#444",fontSize:11,marginTop:2}}>{labels[mode]}</div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:2}}>
+          <div style={{color:"#444",fontSize:11}}>{labels[mode]}</div>
+          {examMode&&<div style={{color:"#4a2000",fontSize:9,letterSpacing:1,textTransform:"uppercase",border:"1px solid #2a1000",padding:"1px 5px",borderRadius:3}}>EXAM -{examMode.daysOut}d</div>}
+        </div>
       </div>
-      <div style={{color:"#555",fontSize:20,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{now}</div>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {streak>0&&<div style={{color:"#2a2000",fontSize:10}}>{"🔥"+streak}</div>}
+        <div style={{color:"#555",fontSize:20,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{now}</div>
+      </div>
     </div>
   );
 }
 
 function ScheduleBlock({block,state}){
   const isCur=state==="current",isPast=state==="past";
-  const bgs={deep:"#0d0d00",light:"#000d0d",break:"transparent",fixed:"#0d000d",meal:"#000a10",movement:"#000d06",hygiene:"#080010",routine:"#0d0800","wind-down":"#100008"};
-  const bls={deep:"#2a2a00",light:"#002a2a",break:"#141414",fixed:"#2a002a",meal:"#001520",movement:"#001a0d",hygiene:"#10001a",routine:"#1a1000","wind-down":"#1a0010"};
-  const lbl={deep:"DEEP",meal:"MEAL",movement:"MOVE",hygiene:"HYGIENE",routine:"ROUTINE","wind-down":"WIND"};
-  return (
+  const bgs={routine:"#0a0800",study:"#0d0d00",meal:"#000a10",movement:"#000d06",free:"#080010",fixed:"#0d000d",sleep:"#06000d"};
+  const bls={routine:"#1a1000",study:"#2a2a00",meal:"#001520",movement:"#001a0d",free:"#100020",fixed:"#1a001a",sleep:"#0d001a"};
+  const lbl={routine:"ROUTINE",study:"STUDY",meal:"MEAL",movement:"MOVE",free:"FREE",fixed:"FIXED",sleep:"SLEEP"};
+  return(
     <div style={{margin:"0 4px 2px",padding:isCur?"11px 14px":"8px 14px",borderRadius:7,background:isCur?"#1a1a1a":bgs[block.type]||"transparent",borderLeft:"2px solid "+(isCur?"#fff":bls[block.type]||"#141414"),opacity:isPast?0.2:1}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{color:isCur?"#888":"#3a3a3a",fontSize:11,minWidth:95,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{block.time}–{block.end}</span>
         <span style={{color:isCur?"#fff":isPast?"#444":"#bbb",fontSize:isCur?14:13,fontWeight:isCur?600:400,flex:1,lineHeight:1.3}}>{block.title}</span>
         {isCur&&<span style={{color:"#000",background:"#fff",fontSize:8,fontWeight:700,letterSpacing:1.5,padding:"2px 5px",borderRadius:3}}>NOW</span>}
-        {!isCur&&!isPast&&lbl[block.type]&&<span style={{color:"#333",fontSize:8,letterSpacing:1}}>{lbl[block.type]}</span>}
+        {!isCur&&!isPast&&lbl[block.type]&&<span style={{color:"#2a2a2a",fontSize:8,letterSpacing:1}}>{lbl[block.type]}</span>}
       </div>
-      {block.work&&block.work!=="none"&&!isPast&&(
-        <div style={{marginTop:5,marginLeft:105,color:isCur?"#555":"#2a2a2a",fontSize:11,lineHeight:1.5,fontStyle:"italic"}}>{block.work}</div>
+      {block.instruction&&block.instruction!=="none"&&!isPast&&(
+        <div style={{marginTop:5,marginLeft:105,color:isCur?"#555":"#2a2a2a",fontSize:11,lineHeight:1.5,fontStyle:"italic"}}>{block.instruction}</div>
       )}
     </div>
   );
@@ -203,7 +305,7 @@ function MessageBubble({msg}){
 
 function ChatFeed({messages,loading,feedRef}){
   return(
-    <div ref={feedRef} style={{height:185,overflowY:"auto",padding:"8px 18px",display:"flex",flexDirection:"column",gap:6,borderTop:"1px solid #141414"}}>
+    <div ref={feedRef} style={{height:190,overflowY:"auto",padding:"8px 18px",display:"flex",flexDirection:"column",gap:6,borderTop:"1px solid #141414"}}>
       {!messages.length&&<div style={{color:"#1e1e1e",fontSize:12,margin:"auto",textAlign:"center"}}>Tell me about your day.</div>}
       {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
       {loading&&<MessageBubble msg={{role:"ai",text:"…"}}/>}
@@ -212,7 +314,7 @@ function ChatFeed({messages,loading,feedRef}){
 }
 
 function InputBar({value,onChange,onSend,disabled,mode}){
-  const ph=mode==="morning"?"Tell me about your day…":mode==="audit"?"Report in…":"Talk to your coach…";
+  const ph=mode==="morning"?"Tell me about your day…":mode==="audit"?"Report what you completed…":"Talk to your mentor…";
   return(
     <div style={{display:"flex",gap:8,padding:"10px 18px 14px",borderTop:"1px solid #141414",background:"#0a0a0a"}}>
       <input style={{flex:1,background:"#111",border:"1px solid #222",borderRadius:7,color:"#fff",padding:"9px 13px",fontSize:14,outline:"none",fontFamily:"inherit"}}
@@ -225,12 +327,12 @@ function InputBar({value,onChange,onSend,disabled,mode}){
 
 function Setup({onComplete}){
   const [name,setName]=useState("");
-  const go=()=>{if(name.trim())onComplete({name:name.trim(),studyStreak:0,subjects:[]});};
+  const go=()=>{if(name.trim())onComplete({name:name.trim(),streak:0,subjects:[],punishments:0,examMode:null});};
   return(
     <div style={{height:"100vh",background:"#0a0a0a",color:"#fff",fontFamily:"system-ui,sans-serif",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:10,padding:"28px 24px",width:"100%",maxWidth:360,display:"flex",flexDirection:"column",gap:14}}>
         <div style={{color:"#fff",fontSize:16,fontWeight:700}}>What's your name?</div>
-        <div style={{color:"#333",fontSize:12,lineHeight:1.7}}>Tell the coach your day each morning. It learns everything else from you as you go.</div>
+        <div style={{color:"#333",fontSize:12,lineHeight:1.7}}>Your mentor builds your day, assigns your tasks, and holds you accountable. Complete tasks and earn rewards. Miss them and face consequences.</div>
         <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoFocus
           onKeyDown={e=>{if(e.key==="Enter")go();}}
           style={{background:"#0d0d0d",border:"1px solid #1e1e1e",borderRadius:6,color:"#fff",padding:"10px 12px",fontSize:14,outline:"none"}}/>
@@ -243,7 +345,7 @@ function Setup({onComplete}){
 function MainScreen({profile:initProfile}){
   const [profile,setProfile]=useState(initProfile);
   const [schedule,setSchedule]=useState([]);
-  const [auditLog,setAuditLog]=useState([]);
+  const [log,setLog]=useState([]);
   const [messages,setMessages]=useState([]);
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
@@ -256,16 +358,17 @@ function MainScreen({profile:initProfile}){
   useEffect(()=>{if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;},[messages,loading]);
 
   useEffect(()=>{
-    Promise.all([sGet(SK.schedule),sGet(SK.auditLog)]).then(([s,a])=>{
+    Promise.all([sGet(SK.schedule),sGet(SK.log)]).then(([s,l])=>{
       if(s&&s.date===todayStr()&&s.blocks&&s.blocks.length)setSchedule(s.blocks);
-      if(a)setAuditLog(a);
+      if(l)setLog(l);
       const m=getMode();
-      if(m==="audit"&&(!a||!a.find(l=>l.date===todayStr()))){
-        triggerAudit(a||[]);
+      if(m==="audit"&&(!l||!l.find(e=>e.date===todayStr()))){
+        triggerAudit(l||[],s?s.blocks:[]);
       } else if(m==="morning"){
-        setMessages([{role:"ai",text:"Morning, "+initProfile.name+". What's your day looking like? Tell me everything — when you woke up, what's fixed, how you're feeling, what needs to get done."}]);
+        const examNote=initProfile.examMode?" You're in exam mode — "+initProfile.examMode.exam+" in "+initProfile.examMode.daysOut+" days.":"";
+        setMessages([{role:"ai",text:"Morning, "+initProfile.name+"."+examNote+" Tell me about your day — when you woke up, what's fixed, how you're feeling, what you need to get done."}]);
       } else {
-        setMessages([{role:"ai",text:"Mid-day. Talk to me if you need to adjust anything."}]);
+        setMessages([{role:"ai",text:"Mid-day. Stay on your schedule. Talk to me if something comes up."}]);
       }
     });
   },[]);
@@ -280,14 +383,14 @@ function MainScreen({profile:initProfile}){
     return d.content?d.content.map(c=>c.text||"").join(""):"";
   }
 
-  async function triggerAudit(log){
+  async function triggerAudit(existingLog,existingSchedule){
     setAuditStarted(true);setLoading(true);
     try{
-      const raw=await claudeCall([{role:"user",content:"Run the evening audit."}],buildAuditSystem(profile,log));
+      const raw=await claudeCall([{role:"user",content:"Run the evening audit."}],buildAuditPrompt(profile,existingLog,existingSchedule));
       const clean=raw.replace(/<AUDIT>[\s\S]*?<\/AUDIT>/g,"").trim();
       conv.current=[{role:"user",content:"Run the evening audit."},{role:"assistant",content:raw}];
       setMessages([{role:"ai",text:clean}]);
-    }catch(e){setMessages([{role:"ai",text:"Audit failed. Report in manually."}]);}
+    }catch(e){setMessages([{role:"ai",text:"Audit failed. Report manually."}]);}
     setLoading(false);
   }
 
@@ -299,7 +402,7 @@ function MainScreen({profile:initProfile}){
     setLoading(true);
     try{
       if(mode==="morning"&&!schedule.length){
-        const raw=await claudeCall(conv.current,buildMorningSystem(profile,auditLog));
+        const raw=await claudeCall(conv.current,buildMorningPrompt(profile,log));
         conv.current=[...conv.current,{role:"assistant",content:raw}];
         const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
         if(sm){try{const bl=JSON.parse(sm[1].trim());setSchedule(bl);await sSet(SK.schedule,{date:todayStr(),blocks:bl});}catch(e){console.error(e);}}
@@ -310,30 +413,32 @@ function MainScreen({profile:initProfile}){
           if(u.subjects&&u.subjects.length)np.subjects=[...new Set([...(np.subjects||[]),...u.subjects])];
           if(u.lastWakeTime)np.lastWakeTime=u.lastWakeTime;
           if(u.lastSleepTime)np.lastSleepTime=u.lastSleepTime;
-          if(u.notes)np.notes=u.notes;
+          if(u.examMode)np.examMode=u.examMode;
           await saveProfile(np);
         }catch(e){console.error(e);}}
         const clean=raw.replace(/<SCHEDULE>[\s\S]*?<\/SCHEDULE>/g,"").replace(/<PROFILE_UPDATE>[\s\S]*?<\/PROFILE_UPDATE>/g,"").trim();
         setMessages(m=>[...m,{role:"ai",text:clean}]);
       } else if(mode==="audit"||auditStarted){
-        const raw=await claudeCall(conv.current,buildAuditSystem(profile,auditLog));
+        const raw=await claudeCall(conv.current,buildAuditPrompt(profile,log,schedule));
         conv.current=[...conv.current,{role:"assistant",content:raw}];
         const am=raw.match(/<AUDIT>([\s\S]*?)<\/AUDIT>/);
         if(am){try{
           const entry=JSON.parse(am[1].trim());
-          const nl=[...auditLog,entry];
-          setAuditLog(nl);await sSet(SK.auditLog,nl);
-          const ns=entry.newStreak!==undefined?entry.newStreak:(entry.floorHit?(profile.studyStreak||0)+1:0);
-          await saveProfile({...profile,studyStreak:ns});
+          const nl=[...log,entry];
+          setLog(nl);await sSet(SK.log,nl);
+          const newStreak=entry.punishments===0&&entry.completed===entry.total?(profile.streak||0)+1:0;
+          const np={...profile,streak:newStreak};
+          if(np.examMode&&np.examMode.daysOut>0){np.examMode={...np.examMode,daysOut:np.examMode.daysOut-1,ritualDay:8-np.examMode.daysOut};}
+          if(np.examMode&&np.examMode.daysOut<=0)np.examMode=null;
+          await saveProfile(np);
         }catch(e){console.error(e);}}
         const clean=raw.replace(/<AUDIT>[\s\S]*?<\/AUDIT>/g,"").trim();
         setMessages(m=>[...m,{role:"ai",text:clean}]);
       } else {
-        const ctx=schedule.map((b,i)=>"["+i+"] "+b.time+"-"+b.end+" "+b.title).join(" | ");
-        const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:buildCoachSystem(profile),message:"Schedule: "+ctx+"\nTime: "+timeStr()+"\nUser: "+msg})});
+        const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:buildCoachPrompt(profile,schedule),message:msg})});
         const d=await r.json();
         const raw=d.content||"";
-        if(raw.includes("REBUILD_NEEDED")){conv.current=[];setSchedule([]);await sSet(SK.schedule,{date:todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Schedule cleared. Tell me your updated constraints."}]);setLoading(false);return;}
+        if(raw.includes("REBUILD_NEEDED")){conv.current=[];setSchedule([]);await sSet(SK.schedule,{date:todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Schedule cleared. Tell me what changed."}]);setLoading(false);return;}
         const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
         if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:todayStr(),blocks:nb});}catch(e){console.error(e);}}
         const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/REBUILD_NEEDED/g,"").trim();
@@ -345,7 +450,7 @@ function MainScreen({profile:initProfile}){
 
   return(
     <div style={{height:"100vh",background:"#0a0a0a",color:"#fff",fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"}}>
-      <Header mode={mode}/>
+      <Header mode={mode} streak={profile.streak||0} examMode={profile.examMode||null}/>
       <ScheduleList blocks={schedule}/>
       <ChatFeed messages={messages} loading={loading} feedRef={feedRef}/>
       <InputBar value={input} onChange={setInput} onSend={send} disabled={loading} mode={mode}/>
