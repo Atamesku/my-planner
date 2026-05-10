@@ -63,7 +63,53 @@ const C={
   sleepBorder:"#20183a",
 };
 
-const STUDY_TECHNIQUES="STUDY TECHNIQUES — assign by priority tier:\n\n"+
+const ONBOARDING_SYSTEM="You are a strict mentor interviewing a new user to build their optimised daily schedule.\n\n"+
+"Ask questions conversationally, 1-2 at a time maximum. Never dump all questions at once.\n"+
+"Listen carefully to each answer before asking the next question.\n"+
+"Adapt your questions based on their answers — if they say they have no routine, don't ask what their routine looks like.\n\n"+
+"COVER THESE AREAS IN ORDER:\n\n"+
+"1. BASICS\n"+
+"   - Name\n"+
+"   - What time do they naturally wake up without an alarm?\n"+
+"   - What time do they usually sleep?\n\n"+
+"2. ENERGY\n"+
+"   - When do they feel sharpest mentally — morning, afternoon, or evening?\n"+
+"   - When do they hit their lowest energy point?\n"+
+"   - How long can they focus before needing a real break?\n\n"+
+"3. FIXED COMMITMENTS\n"+
+"   - What classes, lectures, or work shifts do they have and when?\n"+
+"   - Any recurring commitments or responsibilities at home?\n"+
+"   - How much travel time between places?\n\n"+
+"4. PREDICTABILITY (critical for buffer planning)\n"+
+"   - How consistent are their days — do they follow a pattern or does something always come up?\n"+
+"   - How often do random events hijack their day — daily, a few times a week, rarely?\n"+
+"   - When something unexpected happens, does it come with notice the night before or appear same-day?\n"+
+"   - Are certain days reliably chaotic vs reliably stable?\n\n"+
+"5. STUDY & SUBJECTS\n"+
+"   - What subjects are they currently taking?\n"+
+"   - Which is their weakest right now?\n"+
+"   - Any upcoming exams or deadlines?\n\n"+
+"6. HABITS & BLOCKERS\n"+
+"   - What is their biggest time waster right now?\n"+
+"   - What usually stops them from following a schedule?\n"+
+"   - Do they have any current morning or night routine?\n\n"+
+"7. PHYSICAL\n"+
+"   - Do they exercise at all currently? What and when?\n"+
+"   - What are their usual meal times?\n\n"+
+"8. LIFE\n"+
+"   - Any hobbies or things they do regularly?\n"+
+"   - Anything else about their life I should factor into their schedule?\n\n"+
+"PREDICTABILITY RULES — use answers to set buffer level:\n"+
+"High predictability (days mostly consistent, rare surprises) → tight schedule, minimal buffer\n"+
+"Medium predictability (something comes up a few times a week) → 15-30min buffers between major blocks\n"+
+"Low predictability (daily chaos, same-day surprises) → loose structure, only non-negotiables locked, everything else flexible\n"+
+"Day-specific chaos (e.g. Tuesdays always blow up) → those days get lighter loads by default\n\n"+
+"When you have collected ALL the information, output ONLY:\n"+
+"<PROFILE>\n"+
+"{\"name\":\"\",\"wakeTime\":\"\",\"sleepTime\":\"\",\"peakEnergy\":\"\",\"lowEnergy\":\"\",\"focusDuration\":25,\"subjects\":[],\"weakestSubject\":\"\",\"fixedEvents\":[{\"day\":\"\",\"time\":\"\",\"end\":\"\",\"title\":\"\"}],\"predictability\":\"high|medium|low\",\"chaoticDays\":[],\"bufferMins\":15,\"biggestBlocker\":\"\",\"timeWaster\":\"\",\"exercises\":false,\"hobbies\":[],\"mealTimes\":{\"breakfast\":\"\",\"lunch\":\"\",\"dinner\":\"\"},\"notes\":\"\"}\n"+
+"</PROFILE>\n\n"+
+"Before outputting the profile, tell them: 'I have everything I need. Here is what I am going to build for you:' and give a 3-4 sentence summary of the schedule structure you will create based on their answers. Then ask: 'Does this sound right or is there anything to adjust?' Wait for confirmation before outputting the profile tag.";
+
 "TIER 1 (assign daily):\n"+
 "- Active Recall: test yourself, no notes. Assign as: Close everything. Write all you know about [topic] from memory.\n"+
 "- Spaced Repetition: revisit yesterday's material 10min before new content. Always.\n"+
@@ -79,7 +125,7 @@ const STUDY_TECHNIQUES="STUDY TECHNIQUES — assign by priority tier:\n\n"+
 "- Concept Mapping: draw connections between existing ideas. Use at end of a topic.\n\n"+
 "RULES: Always specify technique with the task. Never assign passive methods. Maths default: practice problems + active recall + spaced repetition every session.";
 
-const EXAM_RITUAL="EXAM RITUAL — when exam is within 7 days. Routines and habits stay identical. Only study blocks change.\n\n"+
+const STUDY_TECHNIQUES="STUDY TECHNIQUES — assign by priority tier:\n\n"+
 "Day 7: Stop new material. List every weak area. Hit list only. Active recall + blurting.\n"+
 "Day 6-5: Work through hit list exclusively. Feynman every weak concept.\n"+
 "Day 4-3: Full past papers timed. Mark ruthlessly. Build error log.\n"+
@@ -88,7 +134,7 @@ const EXAM_RITUAL="EXAM RITUAL — when exam is within 7 days. Routines and habi
 "Exam day: Normal morning routine. Good breakfast. No cramming. Arrive early.\n\n"+
 "Sleep protected harder this week. Free time slightly reduced on simulation days but never eliminated.";
 
-const MENTOR_RULES="You are a strict mentor. You run this person's day, assign tasks, and hold them accountable.\n\n"+
+const EXAM_RITUAL="EXAM RITUAL — when exam is within 7 days. Routines and habits stay identical. Only study blocks change.\n\n"+
 "CONTROLLABLE = PUNISHMENT. UNCONTROLLABLE = LEGITIMATE.\n"+
 "Controllable: poor time management, avoidance, bad choices, social calls they could decline, tiredness from bad sleep or phone use.\n"+
 "Uncontrollable: genuine emergencies, family crises, medical issues, fatigue from a genuinely hard day of classes or work.\n"+
@@ -295,25 +341,64 @@ function InputBar({value,onChange,onSend,disabled,mode}){
   );
 }
 
-function Setup({onComplete}){
-  const [name,setName]=useState("");
-  const go=()=>{if(name.trim())onComplete({name:name.trim(),streak:0,subjects:[],punishments:0,examMode:null});};
+function Onboarding({onComplete}){
+  const [messages,setMessages]=useState([{role:"ai",text:"Let's build your schedule properly. I'm going to ask you a few questions so I can optimise it around how you actually live — not just a generic template.\n\nLet's start simple: what's your name?"}]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const conv=useRef([]);
+  const feedRef=useRef(null);
+
+  useEffect(()=>{if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;},[messages,loading]);
+
+  async function send(){
+    if(!input.trim()||loading)return;
+    const msg=input.trim();setInput("");
+    setMessages(m=>[...m,{role:"user",text:msg}]);
+    conv.current=[...conv.current,{role:"user",content:msg}];
+    setLoading(true);
+    try{
+      const body={model:"claude-sonnet-4-5",max_tokens:800,system:ONBOARDING_SYSTEM,messages:conv.current};
+      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      const d=await r.json();
+      const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
+      conv.current=[...conv.current,{role:"assistant",content:raw}];
+      const profileMatch=raw.match(/<PROFILE>([\s\S]*?)<\/PROFILE>/);
+      if(profileMatch){
+        try{
+          const p=JSON.parse(profileMatch[1].trim());
+          p.streak=0;p.punishments=0;p.examMode=null;
+          await sSet(SK.profile,p);
+          onComplete(p);return;
+        }catch(e){console.error(e);}
+      }
+      const clean=raw.replace(/<PROFILE>[\s\S]*?<\/PROFILE>/g,"").trim();
+      setMessages(m=>[...m,{role:"ai",text:clean}]);
+    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Connection error. Try again."}]);}
+    setLoading(false);
+  }
+
   return(
-    <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui,sans-serif"}}>
-      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"36px 32px",width:"100%",maxWidth:400,display:"flex",flexDirection:"column",gap:16}}>
-        <div>
-          <div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Mentor System</div>
-          <div style={{color:C.text,fontSize:20,fontWeight:700}}>What's your name?</div>
+    <div style={{height:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,background:C.surface,flexShrink:0}}>
+        <div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase"}}>Mentor System</div>
+        <div style={{color:C.textMid,fontSize:12,marginTop:3}}>Building your optimised schedule</div>
+      </div>
+      <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"20px",display:"flex",flexDirection:"column",gap:12,maxWidth:700,width:"100%",margin:"0 auto",boxSizing:"border-box"}}>
+        {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
+        {loading&&(
+          <div style={{alignSelf:"flex-start"}}>
+            <div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Mentor</div>
+            <div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div>
+          </div>
+        )}
+      </div>
+      <div style={{borderTop:"1px solid "+C.border,padding:"12px 20px",background:C.surface,flexShrink:0}}>
+        <div style={{maxWidth:700,margin:"0 auto",display:"flex",gap:10}}>
+          <input style={{flex:1,background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:14,outline:"none",fontFamily:"inherit"}}
+            placeholder="Reply…" value={input} onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey)send();}} disabled={loading} autoFocus/>
+          <button onClick={send} disabled={loading} style={{background:disabled=>disabled?C.accentFaint:C.accent,background:C.accent,color:"#000",border:"none",borderRadius:8,width:44,fontSize:16,fontWeight:700,cursor:"pointer",opacity:loading?0.5:1}}>↑</button>
         </div>
-        <div style={{color:C.textMid,fontSize:13,lineHeight:1.7}}>
-          Your mentor builds your day, assigns your tasks, and holds you accountable. Complete your tasks and earn rewards. Miss them and face consequences.
-        </div>
-        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" autoFocus
-          onKeyDown={e=>{if(e.key==="Enter")go();}}
-          style={{background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"11px 14px",fontSize:14,outline:"none",fontFamily:"inherit"}}/>
-        <button onClick={go} style={{background:C.accent,color:"#000",border:"none",borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer"}}>
-          Begin →
-        </button>
       </div>
     </div>
   );
@@ -444,6 +529,6 @@ export default function App(){
   useEffect(()=>{sGet(SK.profile).then(p=>setState(p&&p.name?p:false));},[]);
   async function handleSetup(p){await sSet(SK.profile,p);setState(p);}
   if(state===null)return <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>Loading…</div></div>;
-  if(state===false)return <Setup onComplete={handleSetup}/>;
+  if(state===false)return <Onboarding onComplete={handleSetup}/>;
   return <MainScreen profile={state}/>;
 }
