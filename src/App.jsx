@@ -382,8 +382,12 @@ function MainScreen({profile:initProfile}){
       if(l)setLog(l);
       const m=getMode();
       const alreadyAudited=l&&l.find(e=>e.date===todayStr());
+      const hasSchedule=s&&s.date===todayStr()&&s.blocks&&s.blocks.length;
       if(m==="audit"&&!alreadyAudited){
         triggerAudit(l||[],s?s.blocks:[]);
+      } else if(!hasSchedule){
+        const en=initProfile.examMode?" You're in exam mode — "+initProfile.examMode.exam+" in "+initProfile.examMode.daysOut+" days.":"";
+        setMessages([{role:"ai",text:"Hey "+initProfile.name+"."+en+" No schedule built yet for today. Tell me about your day — when you woke up, what's fixed, how you're feeling, what needs to get done and I'll build it now."}]);
       } else if(m==="morning"){
         const en=initProfile.examMode?" You're in exam mode — "+initProfile.examMode.exam+" in "+initProfile.examMode.daysOut+" days.":"";
         setMessages([{role:"ai",text:"Morning, "+initProfile.name+"."+en+" Tell me about your day — when you woke up, what's fixed, how you're feeling, what needs to get done."}]);
@@ -421,7 +425,7 @@ function MainScreen({profile:initProfile}){
     conv.current=[...conv.current,{role:"user",content:msg}];
     setLoading(true);
     try{
-      if(mode==="morning"&&!schedule.length){
+      if((mode==="morning"||!schedule.length)&&!schedule.length){
         const raw=await claudeCall(conv.current,buildMorningPrompt(profile,log));
         conv.current=[...conv.current,{role:"assistant",content:raw}];
         const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
