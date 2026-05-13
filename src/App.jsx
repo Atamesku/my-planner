@@ -15,25 +15,16 @@ function getCurIdx(blocks) {
   return idx;
 }
 
-const SB_URL="https://qlectmatqxtqqpwwbrhn.supabase.co";
-const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFsZWN0bWF0cXh0cXFwd3dicmhuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MTUzNjgsImV4cCI6MjA5MDM5MTM2OH0.x98eVDFBeBkVCvQhoJg01sGy30BFB3B7Jcn8cJrU4Qg";
-const USER_ID="default";
 const SK={profile:"ms3_profile",schedule:"ms3_schedule",log:"ms3_log"};
-const mem={};
 
-async function sGet(key){
-  try{
-    const r=await fetch(SB_URL+"/rest/v1/ai_memory?user_id=eq."+USER_ID+"&key=eq."+key+"&select=value",{headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY}});
-    const d=await r.json();
-    if(d&&d.length)return JSON.parse(d[0].value);
-  }catch(e){}
-  return mem[key]||null;
+function sGet(key){
+  try{ const v=localStorage.getItem(key); return Promise.resolve(v?JSON.parse(v):null); }
+  catch(e){ return Promise.resolve(null); }
 }
-async function sSet(key,val){
-  mem[key]=val;
-  try{
-    await fetch(SB_URL+"/rest/v1/ai_memory",{method:"POST",headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:USER_ID,key,value:JSON.stringify(val),updated_at:new Date().toISOString()})});
-  }catch(e){console.error(e);}
+function sSet(key,val){
+  try{ localStorage.setItem(key,JSON.stringify(val)); }
+  catch(e){ console.error(e); }
+  return Promise.resolve();
 }
 
 // ── Colours ────────────────────────────────────────────
