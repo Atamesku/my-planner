@@ -26,35 +26,28 @@ async function sGet(key){
     const val=d.value?JSON.parse(d.value):null;
     mem[key]=val;
     return val;
-  }catch(e){console.error("sGet error",e);return null;}
+  }catch(e){console.error("sGet",e);return null;}
 }
-
 async function sSet(key,val){
   mem[key]=val;
   try{
-    await fetch("/api/memory",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({key,value:JSON.stringify(val)})
-    });
-  }catch(e){console.error("sSet error",e);}
+    await fetch("/api/memory",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,value:JSON.stringify(val)})});
+  }catch(e){console.error("sSet",e);}
 }
 
-// ── Colours ────────────────────────────────────────────
 const C={
-  bg:"#0f0e0c", surface:"#161410", border:"#2a2520", borderLight:"#1e1c18",
-  accent:"#c8922a", accentDim:"#7a5518", accentFaint:"#2a1f0a",
-  text:"#e8e0d0", textMid:"#8a7e6a", textDim:"#4a4238", textFaint:"#2a2520",
-  study:"#1a1800", studyBorder:"#3a3200",
-  routine:"#0e1410", routineBorder:"#1a2a1a",
-  meal:"#0e0e1a", mealBorder:"#1a1a3a",
-  movement:"#0a1410", movementBorder:"#153020",
-  free:"#140e18", freeBorder:"#2a1a30",
-  sleep:"#100e18", sleepBorder:"#20183a",
-  buffer:"#141210", bufferBorder:"#2a2418",
+  bg:"#0f0e0c",surface:"#161410",border:"#2a2520",borderLight:"#1e1c18",
+  accent:"#c8922a",accentDim:"#7a5518",accentFaint:"#2a1f0a",
+  text:"#e8e0d0",textMid:"#8a7e6a",textDim:"#4a4238",textFaint:"#2a2520",
+  study:"#1a1800",studyBorder:"#3a3200",
+  routine:"#0e1410",routineBorder:"#1a2a1a",
+  meal:"#0e0e1a",mealBorder:"#1a1a3a",
+  movement:"#0a1410",movementBorder:"#153020",
+  free:"#140e18",freeBorder:"#2a1a30",
+  sleep:"#100e18",sleepBorder:"#20183a",
+  buffer:"#141210",bufferBorder:"#2a2418",
 };
 
-// ── All prompt strings defined first ──────────────────
 const MENTOR_RULES=
 "You are a strict mentor. You run this person's day, assign tasks, and hold them accountable.\n\n"+
 "CONTROLLABLE = PUNISHMENT. UNCONTROLLABLE = LEGITIMATE.\n"+
@@ -76,8 +69,7 @@ const STUDY_TECHNIQUES=
 "TIER 2 (3-4x/week): Feynman Technique, Interleaved Practice, Active Note-Taking.\n"+
 "TIER 3 (new material/review): SQ3R, Mind Mapping, Concept Mapping.\n\n"+
 "Always specify technique with task. Never assign passive methods.\n"+
-"Maths default: practice problems + active recall + spaced repetition every session.\n"+
-"Assign as: 'Solve 5 [topic] problems without notes (Practice Test), then write everything you know about [topic] from memory (Active Recall).'";
+"Maths default: practice problems + active recall + spaced repetition every session.";
 
 const EXAM_RITUAL=
 "EXAM RITUAL — when exam within 7 days. Routines stay identical. Only study blocks change.\n"+
@@ -106,10 +98,10 @@ const ONBOARDING_SYSTEM=
 "11. Exercise habits and usual meal times\n"+
 "12. Hobbies or anything else to factor in\n\n"+
 "PREDICTABILITY RULES:\n"+
-"High predictability → tight schedule, minimal buffer (10min)\n"+
-"Medium predictability → 15-20min buffers between major blocks\n"+
-"Low predictability → loose structure, only non-negotiables locked, 30min buffers\n"+
-"Chaotic specific days → those days get lighter loads\n\n"+
+"High predictability: tight schedule, minimal buffer (10min)\n"+
+"Medium predictability: 15-20min buffers between major blocks\n"+
+"Low predictability: loose structure, only non-negotiables locked, 30min buffers\n"+
+"Chaotic specific days: those days get lighter loads\n\n"+
 "When you have ALL info, say: 'I have everything I need. Here is what I am going to build for you:' and give a 3-4 sentence summary. Ask 'Does this sound right or anything to adjust?' Wait for confirmation, then output:\n"+
 "<PROFILE>\n"+
 "{\"name\":\"\",\"wakeTime\":\"\",\"sleepTime\":\"\",\"peakEnergy\":\"\",\"lowEnergy\":\"\",\"focusDuration\":25,\"subjects\":[],\"weakestSubject\":\"\",\"fixedEvents\":[],\"predictability\":\"medium\",\"chaoticDays\":[],\"bufferMins\":15,\"biggestBlocker\":\"\",\"timeWaster\":\"\",\"exercises\":false,\"hobbies\":[],\"mealTimes\":{\"breakfast\":\"\",\"lunch\":\"\",\"dinner\":\"\"},\"notes\":\"\",\"streak\":0,\"examMode\":null}\n"+
@@ -118,9 +110,9 @@ const ONBOARDING_SYSTEM=
 function detectPatterns(logs){
   if(!logs||!logs.length)return [];
   const p=[]; const l3=logs.slice(-3);
-  if(l3.length>=3&&l3.every(l=>l.punishments>0)) p.push("Punishments 3+ days — reassess load or scheduling.");
+  if(l3.length>=3&&l3.every(l=>l.punishments>0)) p.push("Punishments 3+ days — reassess load.");
   if(l3.length>=3&&l3.every(l=>l.completed<l.total)) p.push("Incomplete days 3+ — avoidance or overloading.");
-  if(logs.filter(l=>l.notes&&l.notes.toLowerCase().includes("phone")).length>=3) p.push("Phone violations recurring — enforce strictly.");
+  if(logs.filter(l=>l.notes&&l.notes.toLowerCase().includes("phone")).length>=3) p.push("Phone violations recurring.");
   if(l3.length>=3&&l3.every(l=>l.streak===0)) p.push("Streak not building — consistency is the only target.");
   return p;
 }
@@ -140,13 +132,12 @@ function buildMorningPrompt(profile,log){
   const examMode=profile.examMode||null;
   const recentLog=(log||[]).slice(-5);
   const logStr=recentLog.length?recentLog.map(l=>"  "+l.date+": "+l.completed+"/"+l.total+" tasks, punishments="+l.punishments+", streak="+l.streak).join("\n"):"  No history yet.";
-  const bufNote=pred==="low"?"LOW PREDICTABILITY: Lock only non-negotiables. Add "+buf+"min buffers. Keep free time flexible.":pred==="high"?"HIGH PREDICTABILITY: Tight schedule. Minimal buffers.":"MEDIUM PREDICTABILITY: "+buf+"min buffers between major blocks.";
-  const examNote=examMode?"EXAM MODE: "+examMode.exam+" in "+examMode.daysOut+" days. Ritual day "+examMode.ritualDay+". Apply exam ritual to study blocks.":"";
-
+  const bufNote=pred==="low"?"LOW PREDICTABILITY: Lock only non-negotiables. "+buf+"min buffers.":pred==="high"?"HIGH PREDICTABILITY: Tight schedule.":"MEDIUM PREDICTABILITY: "+buf+"min buffers between major blocks.";
+  const examNote=examMode?"EXAM MODE: "+examMode.exam+" in "+examMode.daysOut+" days. Ritual day "+examMode.ritualDay+".":"";
   return "Strict mentor for "+name+". Time: "+timeStr()+". Date: "+dateStr()+".\n\n"+
     MENTOR_RULES+"\n\n"+STUDY_TECHNIQUES+"\n\n"+EXAM_RITUAL+"\n\n"+
     "PROFILE: "+name+" | Subjects: "+subjects+" | Streak: "+streak+"d\n"+
-    "Peak energy: "+peak+" | Low: "+low+" | Focus: "+focus+"min\n"+
+    "Peak: "+peak+" | Low: "+low+" | Focus: "+focus+"min\n"+
     "Predictability: "+pred+" | Buffer: "+buf+"min | "+bufNote+"\n"+
     (chaotic!=="none"?"Chaotic days: "+chaotic+"\n":"")+
     "Fixed events: "+fixed+"\nMeals: "+meals+"\n"+
@@ -154,15 +145,15 @@ function buildMorningPrompt(profile,log){
     (examNote?examNote+"\n":"")+
     "HISTORY:\n"+logStr+"\n\n"+
     "BUILD FULL SCHEDULE (every hour wake to sleep):\n"+
-    "- Morning routine first: water, brush, shower, dress, breakfast, phone last\n"+
+    "- Morning routine: water, brush, shower, dress, breakfast, phone last\n"+
     "- Peak window ("+peak+"): hardest study blocks, Tier 1 techniques\n"+
     "- Low window ("+low+"): light tasks, meals, movement\n"+
     "- Study: specific subject + topic + quantity + technique. Hard first. Streak gates: 0-2=light, 3-6=moderate, 7+=full\n"+
     "- Focus blocks: "+focus+"min work then break\n"+
-    "- Add "+buf+"min buffer blocks after major blocks (pred: "+pred+")\n"+
+    "- Add "+buf+"min buffer blocks after major blocks\n"+
     "- Night routine: tidy, reflect, wind-down, phone away, sleep\n"+
-    "Build from NOW ("+timeStr()+"). Parse user message fully. Ask ONE question only if critical info missing.\n"+
-    "Output readable text first (time — task — instruction), then:\n"+
+    "Build from NOW ("+timeStr()+"). Be specific. No generic tasks.\n"+
+    "Output readable text first, then:\n"+
     "<SCHEDULE>[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Task\",\"type\":\"routine|study|meal|movement|free|fixed|sleep|buffer\",\"instruction\":\"technique + task\"}]</SCHEDULE>\n"+
     "<PROFILE_UPDATE>{\"subjects\":[],\"lastWakeTime\":\"\",\"examMode\":null}</PROFILE_UPDATE>";
 }
@@ -191,7 +182,6 @@ function buildCoachPrompt(profile,schedule){
     "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"}\nREBUILD_NEEDED if major change.";
 }
 
-// ── Components ─────────────────────────────────────────
 function Header({mode,streak,examMode}){
   const [now,setNow]=useState(timeStr());
   useEffect(()=>{const t=setInterval(()=>setNow(timeStr()),1000);return()=>clearInterval(t);},[]);
@@ -257,7 +247,7 @@ function SchedulePanel({blocks}){
       </div>
       <div ref={ref} style={{flex:1,overflowY:"auto",padding:"6px 4px"}}>
         {!blocks.length?(
-          <div style={{padding:"20px 12px",color:C.textFaint,fontSize:11,textAlign:"center",lineHeight:1.6}}>No schedule yet.<br/>Tell the mentor about your day.</div>
+          <div style={{padding:"20px 12px",color:C.textFaint,fontSize:11,textAlign:"center",lineHeight:1.6}}>Building your schedule…</div>
         ):blocks.map((b,i)=>(
           <div key={i} data-idx={i}><ScheduleBlock block={b} state={i===ci?"current":i<ci?"past":"future"}/></div>
         ))}
@@ -281,7 +271,7 @@ function MessageBubble({msg}){
 function ChatPanel({messages,loading,feedRef}){
   return(
     <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"flex",flexDirection:"column",gap:12}}>
-      {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your mentor is ready.<br/>Tell them about your day.</div>}
+      {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your mentor is ready.</div>}
       {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
       {loading&&(
         <div style={{alignSelf:"flex-start"}}>
@@ -308,14 +298,12 @@ function InputBar({value,onChange,onSend,disabled,placeholder}){
   );
 }
 
-// ── Onboarding ─────────────────────────────────────────
 function Onboarding({onComplete}){
   const [messages,setMessages]=useState([{role:"ai",text:"Let's build your schedule properly. I'm going to ask you a few questions so I can optimise it around how you actually live — not a generic template.\n\nLet's start: what's your name?"}]);
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const conv=useRef([]);
   const feedRef=useRef(null);
-
   useEffect(()=>{if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;},[messages,loading]);
 
   async function send(){
@@ -373,7 +361,6 @@ function Onboarding({onComplete}){
   );
 }
 
-// ── Main screen ────────────────────────────────────────
 function MainScreen({profile:initProfile}){
   const [profile,setProfile]=useState(initProfile);
   const [schedule,setSchedule]=useState([]);
@@ -391,26 +378,45 @@ function MainScreen({profile:initProfile}){
 
   useEffect(()=>{
     Promise.all([sGet(SK.schedule),sGet(SK.log)]).then(([s,l])=>{
-      if(s&&s.date===todayStr()&&s.blocks&&s.blocks.length)setSchedule(s.blocks);
       if(l)setLog(l);
       const m=getMode();
       const alreadyAudited=l&&l.find(e=>e.date===todayStr());
       const hasSchedule=s&&s.date===todayStr()&&s.blocks&&s.blocks.length;
       if(m==="audit"&&!alreadyAudited){
         triggerAudit(l||[],s?s.blocks:[]);
-      } else if(!hasSchedule){
-        const en=initProfile.examMode?" You're in exam mode — "+initProfile.examMode.exam+" in "+initProfile.examMode.daysOut+" days.":"";
-        setMessages([{role:"ai",text:"Hey "+initProfile.name+"."+en+" No schedule built yet for today. Tell me about your day — when you woke up, what's fixed, how you're feeling, what needs to get done and I'll build it now."}]);
-      } else if(m==="morning"){
-        const en=initProfile.examMode?" You're in exam mode — "+initProfile.examMode.exam+" in "+initProfile.examMode.daysOut+" days.":"";
-        setMessages([{role:"ai",text:"Morning, "+initProfile.name+"."+en+" Tell me about your day — when you woke up, what's fixed, how you're feeling, what needs to get done."}]);
+      } else if(hasSchedule){
+        setSchedule(s.blocks);
+        setMessages([{role:"ai",text:"Your schedule is loaded. Stay on it. Talk to me if something comes up."}]);
       } else {
-        setMessages([{role:"ai",text:"Mid-day. Stay on your schedule. Talk to me if something comes up."}]);
+        autoBuild(l||[]);
       }
     });
   },[]);
 
   async function saveProfile(p){setProfile(p);await sSet(SK.profile,p);}
+
+  async function autoBuild(existingLog){
+    setLoading(true);
+    setMessages([{role:"ai",text:"Building your schedule for today…"}]);
+    try{
+      const prompt="Build my full schedule for today. Current time: "+timeStr()+". Date: "+dateStr()+". Use my profile — build everything from now until sleep. Do not ask me anything.";
+      const raw=await claudeCall([{role:"user",content:prompt}],buildMorningPrompt(initProfile,existingLog));
+      const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
+      if(sm){
+        try{
+          const bl=JSON.parse(sm[1].trim());
+          setSchedule(bl);
+          await sSet(SK.schedule,{date:todayStr(),blocks:bl});
+        }catch(e){console.error(e);}
+      }
+      const clean=raw.replace(/<SCHEDULE>[\s\S]*?<\/SCHEDULE>/g,"").replace(/<PROFILE_UPDATE>[\s\S]*?<\/PROFILE_UPDATE>/g,"").trim();
+      setMessages([{role:"ai",text:clean||"Schedule built. Stay on it."}]);
+    }catch(e){
+      console.error(e);
+      setMessages([{role:"ai",text:"Failed to build schedule. Try talking to me."}]);
+    }
+    setLoading(false);
+  }
 
   async function claudeCall(msgs,sys){
     const body={model:"claude-sonnet-4-5",max_tokens:2000,messages:msgs};
@@ -438,45 +444,45 @@ function MainScreen({profile:initProfile}){
     conv.current=[...conv.current,{role:"user",content:msg}];
     setLoading(true);
     try{
-      if((mode==="morning"||!schedule.length)&&!schedule.length){
-        const raw=await claudeCall(conv.current,buildMorningPrompt(profile,log));
-        conv.current=[...conv.current,{role:"assistant",content:raw}];
-        const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
-        if(sm){try{const bl=JSON.parse(sm[1].trim());setSchedule(bl);await sSet(SK.schedule,{date:todayStr(),blocks:bl});}catch(e){console.error(e);}}
-        const pm=raw.match(/<PROFILE_UPDATE>([\s\S]*?)<\/PROFILE_UPDATE>/);
-        if(pm){try{
-          const u=JSON.parse(pm[1].trim());
-          const np={...profile};
-          if(u.subjects&&u.subjects.length)np.subjects=[...new Set([...(np.subjects||[]),...u.subjects])];
-          if(u.lastWakeTime)np.lastWakeTime=u.lastWakeTime;
-          if(u.examMode)np.examMode=u.examMode;
-          await saveProfile(np);
-        }catch(e){console.error(e);}}
-        const clean=raw.replace(/<SCHEDULE>[\s\S]*?<\/SCHEDULE>/g,"").replace(/<PROFILE_UPDATE>[\s\S]*?<\/PROFILE_UPDATE>/g,"").trim();
-        setMessages(m=>[...m,{role:"ai",text:clean}]);
-      } else if(mode==="audit"||auditStarted){
+      if(mode==="audit"||auditStarted){
         const raw=await claudeCall(conv.current,buildAuditPrompt(profile,log,schedule));
         conv.current=[...conv.current,{role:"assistant",content:raw}];
         const am=raw.match(/<AUDIT>([\s\S]*?)<\/AUDIT>/);
-        if(am){try{
-          const entry=JSON.parse(am[1].trim());
-          const nl=[...log,entry];
-          setLog(nl);await sSet(SK.log,nl);
-          const ns=entry.punishments===0&&entry.completed===entry.total?(profile.streak||0)+1:0;
-          const np={...profile,streak:ns};
-          if(np.examMode&&np.examMode.daysOut>0){np.examMode={...np.examMode,daysOut:np.examMode.daysOut-1,ritualDay:8-np.examMode.daysOut};}
-          if(np.examMode&&np.examMode.daysOut<=0)np.examMode=null;
-          await saveProfile(np);
-        }catch(e){console.error(e);}}
+        if(am){
+          try{
+            const entry=JSON.parse(am[1].trim());
+            const nl=[...log,entry];
+            setLog(nl);await sSet(SK.log,nl);
+            const ns=entry.punishments===0&&entry.completed===entry.total?(profile.streak||0)+1:0;
+            const np={...profile,streak:ns};
+            if(np.examMode&&np.examMode.daysOut>0){np.examMode={...np.examMode,daysOut:np.examMode.daysOut-1,ritualDay:8-np.examMode.daysOut};}
+            if(np.examMode&&np.examMode.daysOut<=0)np.examMode=null;
+            await saveProfile(np);
+          }catch(e){console.error(e);}
+        }
         const clean=raw.replace(/<AUDIT>[\s\S]*?<\/AUDIT>/g,"").trim();
         setMessages(m=>[...m,{role:"ai",text:clean}]);
       } else {
         const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:buildCoachPrompt(profile,schedule),message:msg})});
         const d=await r.json();
         const raw=d.content||"";
-        if(raw.includes("REBUILD_NEEDED")){conv.current=[];setSchedule([]);await sSet(SK.schedule,{date:todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Schedule cleared. Tell me what changed."}]);setLoading(false);return;}
+        if(raw.includes("REBUILD_NEEDED")){
+          conv.current=[];
+          await sSet(SK.schedule,{date:todayStr(),blocks:[]});
+          setMessages(m=>[...m,{role:"ai",text:"Rebuilding your schedule…"}]);
+          setLoading(false);
+          await autoBuild(log);
+          return;
+        }
         const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
-        if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:todayStr(),blocks:nb});}catch(e){console.error(e);}}
+        if(upd){
+          try{
+            const o=JSON.parse(upd[1]);
+            const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);
+            setSchedule(nb);
+            await sSet(SK.schedule,{date:todayStr(),blocks:nb});
+          }catch(e){console.error(e);}
+        }
         const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/REBUILD_NEEDED/g,"").trim();
         if(clean)setMessages(m=>[...m,{role:"ai",text:clean}]);
       }
@@ -484,7 +490,7 @@ function MainScreen({profile:initProfile}){
     setLoading(false);
   }
 
-  const ph={morning:"Tell me about your day…",executing:"Talk to your mentor…",audit:"Report what you completed…"}[mode];
+  const ph=mode==="audit"?"Report what you completed…":"Talk to your mentor…";
 
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
@@ -500,7 +506,6 @@ function MainScreen({profile:initProfile}){
   );
 }
 
-// ── Root ───────────────────────────────────────────────
 export default function App(){
   const [state,setState]=useState(null);
   useEffect(()=>{sGet(SK.profile).then(p=>setState(p&&p.name?p:false));},[]);
