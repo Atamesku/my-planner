@@ -18,12 +18,19 @@ function getCurIdx(blocks) {
 const SK={profile:"ms3_profile",schedule:"ms3_schedule",log:"ms3_log"};
 
 function sGet(key){
-  try{ const v=localStorage.getItem(key); return Promise.resolve(v?JSON.parse(v):null); }
-  catch(e){ return Promise.resolve(null); }
+  try{
+    const v=localStorage.getItem(key);
+    console.log("sGet",key,"->",v?"found":"null");
+    return Promise.resolve(v?JSON.parse(v):null);
+  }
+  catch(e){ console.error("sGet error",key,e); return Promise.resolve(null); }
 }
 function sSet(key,val){
-  try{ localStorage.setItem(key,JSON.stringify(val)); }
-  catch(e){ console.error(e); }
+  try{
+    localStorage.setItem(key,JSON.stringify(val));
+    console.log("sSet",key,"-> saved, length="+JSON.stringify(val).length);
+  }
+  catch(e){ console.error("sSet error",key,e); }
   return Promise.resolve();
 }
 
