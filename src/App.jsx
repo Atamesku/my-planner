@@ -10,8 +10,10 @@ function getMode(){const h=new Date().getHours();return h<12?"morning":h<20?"exe
 function toMins(t){const [h,m]=t.split(":").map(Number);return h*60+m;}
 function nowMins(){const n=new Date();return n.getHours()*60+n.getMinutes();}
 function getCurIdx(blocks){const now=nowMins();let idx=-1;for(let i=0;i<blocks.length;i++){if(toMins(blocks[i].time)<=now)idx=i;else break;}return idx;}
+function getMondayStr(){const d=new Date();const day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));return d.toDateString();}
+function dayOfWeek(){return new Date().toLocaleDateString([],{weekday:"long"});}
 
-const SK={profile:"ms4_profile",schedule:"ms4_schedule",log:"ms4_log"};
+const SK={profile:"cv5_profile",schedule:"cv5_schedule",log:"cv5_log"};
 const mem={};
 async function sGet(key){
   try{
@@ -41,83 +43,111 @@ const C={
   buffer:"#141210",bufferBorder:"#2a2418",
 };
 
-const ONBOARDING_SYSTEM="You are a strict accountability coach setting up a user's bedrock schedule. Your job is to understand what they have committed to and what bad habits they want to fix — then enforce it daily.\n\nAsk questions one at a time. Be direct and conversational. Cover:\n1. Their name\n2. Their bedrock commitments — what non-negotiable blocks do they want to stick to every day? (wake time, study sessions, meals, movement, sleep, morning routine etc). Ask them to list everything they genuinely want to commit to. Push back if it seems too ambitious — start small.\n3. Their bad habits — what do they know they do that works against them? For each habit get the current baseline (e.g. how many hours on phone, what time they sleep, etc). Set a first target that is 10-30% better than baseline — never jump to perfect.\n4. Anything else the coach should know to hold them accountable.\n\nWhen you have everything, summarise the bedrock and habits back to them. Ask: does this look right? Once confirmed output only:\n<PROFILE>\n{\"name\":\"\",\"bedrock\":[{\"time\":\"HH:MM\",\"title\":\"\",\"duration\":30,\"type\":\"routine|study|meal|movement|sleep\"}],\"habits\":[{\"name\":\"\",\"baseline\":\"\",\"target\":\"\",\"unit\":\"\",\"streak\":0}],\"streak\":0,\"notes\":\"\"}\n</PROFILE>";
+const ONBOARDING_SYSTEM="You are a strict accountability coach designing a bedrock schedule for a new user. Your job: learn about their life, design a realistic schedule, let them tweak it, then lock it in as their bedrock.\n\nPHASE 1 - LEARN (ask one question at a time):\n1. Name\n2. Wake time and sleep time (what they actually do, not ideal)\n3. Peak energy window — when are they sharpest?\n4. Fixed commitments — classes, work, anything immovable\n5. What subjects or work they need to do regularly\n6. Bad habits — what works against them? For each: get baseline (e.g. hours on phone, sleep time). Set first target 10-30% better than baseline, never jump to perfect.\n7. Anything else relevant\n\nPHASE 2 - DESIGN:\nOnce you have enough info, design a full bedrock schedule. This is a daily template — the non-negotiable foundation that repeats every day.\nInclude: wake, morning routine (water brush shower dress breakfast), study blocks in peak window, meals, movement, free time, night routine, sleep.\nBe realistic — do not overload. Start conservative. User can always add more later.\nPresent it clearly as a list: TIME — BLOCK — DURATION.\n\nPHASE 3 - REFINE:\nAfter presenting, ask: What do you want to change, remove, or lock in as non-negotiable?\nMake changes based on their feedback. Repeat until they confirm.\n\nPHASE 4 - CONFIRM:\nOnce confirmed output ONLY:\n<PROFILE>\n{\"name\":\"\",\"wakeTime\":\"\",\"sleepTime\":\"\",\"peakEnergy\":\"\",\"phase\":1,\"phaseStartDate\":\"\",\"lastBedrockReview\":\"\",\"examMode\":null,\"streak\":0,\"habits\":[{\"name\":\"\",\"baseline\":\"\",\"target\":\"\",\"unit\":\"\",\"streak\":0}],\"bedrock\":[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"\",\"type\":\"routine|study|meal|movement|free|sleep\"}],\"weeklyReflectionDue\":\"\",\"bedrockReviewDue\":\"\"}\n</PROFILE>";
 
-const ENFORCE_RULES="You are a strict accountability coach. The user has defined their own bedrock schedule — your job is to enforce it, not redesign it.\n\nCONTROLLABLE = PUNISHMENT. UNCONTROLLABLE = LEGITIMATE.\nControllable: poor time management, avoidance, low motivation, social calls they could decline, tiredness from bad choices.\nUncontrollable: genuine emergencies, family crises, medical issues, fatigue from a genuinely hard day of classes or work.\nTest: could they have prevented this? Yes = punish. No = legitimate.\n\nPUNISHMENTS: missed block carries over tomorrow before any free time. 30min free time removed per controllable miss. Call it out directly by name.\nREWARDS: acknowledge streaks at 3, 7, 14, 30 days. Lighter tone when earning consistency.\n\nHABIT RULES: Track each bad habit. If user reports hitting their target = streak +1. Every 3 days consistent = tighten target by 10-20%. If they fail = reset to baseline, no escalation.\n\nPROGRESSIVE ENFORCEMENT: Only enforce what is in the bedrock. If user wants to add something new, phase it in — suggest starting small and building for 3+ days before it becomes enforced.\n\nBe direct. Max 3 sentences in casual chat. No fluff. Push back immediately on weak excuses.";
+const ENFORCE_RULES="You are a strict accountability coach. You designed this person's bedrock schedule. Your job is to enforce it and help them build discipline.\n\nCONTROLLABLE=PUNISHMENT. UNCONTROLLABLE=LEGITIMATE.\nControllable: poor time management, avoidance, low motivation, social calls they could decline, tiredness from bad choices.\nUncontrollable: genuine emergencies, family crises, medical issues, fatigue from a genuinely hard day of classes or work.\nTest: could they have prevented this? Yes=punish. No=legitimate.\n\nPUNISHMENTS: missed block carries over tomorrow before free time. 30min free time removed per miss. Call it out by name.\nREWARDS: acknowledge streaks at 3, 7, 14, 30 days. Lighter tone when consistent.\n\nHABIT TRACKING: streak +1 when target hit. Every 3 days consistent = tighten target 15%. Fail = reset to baseline.\n\nPHASE RULES:\nPhase 1 (days 1-14): coach builds schedule daily, enforces bedrock, tracks habits.\nPhase 2 (day 15+): coach is accountability only. No more daily schedule building unless requested. User owns their schedule.\nHandoff message at day 14: tell them they are ready to own their schedule in Excel.\n\nEXAM MODE: when active, shift audit questions to exam prep. Follow 7-day ritual: Day 7=audit weak areas, Day 6-5=targeted repair, Day 4-3=timed past papers+error log, Day 2=error correction only, Day 1=light review+rest.\n\nPATTERN DETECTION: after 3+ days of same failure, name it specifically. Flag day-specific patterns.\n\nBEDROCK REVIEW: every 21 days, prompt user to review commitments. They decide what changes.\n\nWEEKLY REFLECTION: every Monday, ask how the week went. One pattern. One suggestion.\n\nMax 3 sentences in casual chat. Direct. Push back on weak excuses immediately.";
 
 function buildDayPrompt(profile,log){
   const streak=profile.streak||0;
-  const bedrock=(profile.bedrock||[]).map(b=>b.time+" "+b.title+" ("+b.duration+"min)").join(", ");
-  const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+" (streak "+h.streak+"d)").join(", ");
-  const recent=(log||[]).slice(-5).map(l=>l.date+": "+l.completed+"/"+l.total+" done, "+l.punishments+" punishments").join("; ")||"no history yet";
-  return "Strict accountability coach for "+profile.name+". Time: "+timeStr()+". Date: "+dateStr()+".\n"+
+  const bedrock=(profile.bedrock||[]).map(b=>b.time+"-"+b.end+" "+b.title).join(", ");
+  const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+" (streak "+h.streak+"d)").join("; ")||"none";
+  const recent=(log||[]).slice(-5).map(l=>l.date+": "+l.completed+"/"+l.total+" done, "+l.punishments+" punishments, streak "+l.streak).join(" | ")||"no history";
+  const phase=profile.phase||1;
+  const examMode=profile.examMode;
+  const patterns=detectPatterns((log||[]).slice(-7));
+  const examNote=examMode?"EXAM MODE: "+examMode.name+" in "+examMode.daysOut+" days. Today is ritual day "+(8-examMode.daysOut)+". Apply exam ritual protocol to study blocks.":"";
+  return "Accountability coach for "+profile.name+". Time: "+timeStr()+". Date: "+dateStr()+".\n"+
     ENFORCE_RULES+"\n\n"+
-    "BEDROCK (what they committed to — never change this without their request):\n"+bedrock+"\n\n"+
-    "BAD HABITS being tracked:\n"+habits+"\n\n"+
-    "RECENT HISTORY: "+recent+"\n\n"+
-    "BUILD TODAY'S SCHEDULE:\n"+
-    "Place each bedrock block at its committed time. Fill gaps with free time or buffer.\n"+
-    "Start from NOW ("+timeStr()+"). Every hour accounted for until sleep.\n"+
-    "Be specific on study blocks: subject + topic + method.\n"+
+    "BEDROCK: "+bedrock+"\n"+
+    "HABITS: "+habits+"\n"+
+    "STREAK: "+streak+" days. Phase: "+phase+".\n"+
+    "HISTORY: "+recent+"\n"+
+    (patterns.length?"PATTERNS: "+patterns.join(" | ")+"\n":"")+
+    (examNote?examNote+"\n":"")+
+    "\nBuild today's schedule from NOW ("+timeStr()+") until sleep.\n"+
+    "Place each bedrock block at its time. Fill gaps with free time or buffer.\n"+
+    "Study blocks: specific subject + topic + active method (never passive).\n"+
+    (phase>=2?"This is Phase 2 — only build if explicitly requested. Otherwise just confirm bedrock is loaded.\n":"")+
     "Output readable schedule first, then:\n"+
     "<SCHEDULE>[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Block\",\"type\":\"routine|study|meal|movement|free|sleep|buffer\",\"instruction\":\"details or none\"}]</SCHEDULE>";
 }
 
 function buildAuditPrompt(profile,log,schedule){
   const streak=profile.streak||0;
-  const bedrock=(profile.bedrock||[]).map((b,i)=>(i+1)+". "+b.time+" "+b.title).join("\n");
-  const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+", streak "+h.streak+"d").join("\n");
+  const phase=profile.phase||1;
+  const bedrock=(profile.bedrock||[]).map((b,i)=>(i+1)+". "+b.time+" "+b.title).join("\n")||"none";
+  const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+", streak "+h.streak+"d").join("\n")||"none";
   const patterns=detectPatterns((log||[]).slice(-7));
-  return "Auditing "+profile.name+"'s day. Streak: "+streak+"d.\n"+
+  const isMonday=dayOfWeek()==="Monday";
+  const reviewDue=profile.bedrockReviewDue&&new Date()>=new Date(profile.bedrockReviewDue);
+  const examMode=profile.examMode;
+  const daysInPhase1=Math.floor((new Date()-new Date(profile.phaseStartDate||todayStr()))/(1000*60*60*24));
+  const handoff=phase===1&&daysInPhase1>=14;
+  return "Auditing "+profile.name+"'s day. Streak: "+streak+"d. Phase: "+phase+".\n"+
     ENFORCE_RULES+"\n\n"+
-    "TODAY'S BEDROCK:\n"+bedrock+"\n\n"+
+    "BEDROCK:\n"+bedrock+"\n\n"+
     "HABITS:\n"+habits+"\n\n"+
-    (patterns.length?"PATTERNS:\n"+patterns.join("\n")+"\n\n":"")+
-    "Ask them to report against each bedrock block. For each miss: get their reason, apply controllable test, punish or accept.\n"+
-    "Then ask about each habit — did they hit their target today?\n"+
-    "End with exactly what changes tomorrow based on today.\n"+
-    "Direct. No softening on controllable misses.\n\n"+
-    "<AUDIT>{\"date\":\""+todayStr()+"\",\"completed\":0,\"total\":"+(profile.bedrock||[]).length+",\"punishments\":0,\"streak\":"+streak+",\"habitUpdates\":[{\"name\":\"\",\"hit\":true}],\"notes\":\"\"}</AUDIT>";
+    (patterns.length?"PATTERNS:\n"+patterns.map(p=>"- "+p).join("\n")+"\n\n":"")+
+    (examMode?"EXAM MODE: "+examMode.name+" in "+examMode.daysOut+" days. Focus audit on exam prep.\n\n":"")+
+    (isMonday?"TODAY IS MONDAY: Start with a brief weekly reflection — how did last week go? One pattern. One suggestion.\n\n":"")+
+    (reviewDue?"BEDROCK REVIEW DUE: Ask if their commitments still make sense. Let them decide what changes.\n\n":"")+
+    (handoff?"HANDOFF: User has been in Phase 1 for 14+ days. Tell them they are ready to own their schedule. Explain Phase 2.\n\n":"")+
+    "Ask them to report against each bedrock block. For each miss: get reason, apply controllable test, punish or accept.\n"+
+    "Ask about each habit — did they hit their target?\n"+
+    "State exactly what changes tomorrow.\n\n"+
+    "<AUDIT>{\"date\":\""+todayStr()+"\",\"completed\":0,\"total\":"+(profile.bedrock||[]).length+",\"punishments\":0,\"streak\":"+streak+",\"habitUpdates\":[],\"advancePhase\":false,\"notes\":\"\"}</AUDIT>";
 }
 
 function buildCoachPrompt(profile,schedule){
   const bedrock=(profile.bedrock||[]).map(b=>b.time+" "+b.title).join(", ");
   const habits=(profile.habits||[]).map(h=>h.name+" target "+h.target+h.unit).join(", ");
   const ctx=(schedule||[]).map((b,i)=>"["+i+"] "+b.time+"-"+b.end+" "+b.title).join(" | ");
-  return "Accountability coach for "+profile.name+". Streak: "+(profile.streak||0)+"d.\n"+
+  const examMode=profile.examMode;
+  return "Accountability coach for "+(profile.name||"user")+". Streak: "+(profile.streak||0)+"d. Phase: "+(profile.phase||1)+".\n"+
     ENFORCE_RULES+"\n"+
-    "Bedrock: "+bedrock+"\nHabits: "+habits+"\nToday: "+ctx+"\nTime: "+timeStr()+"\n"+
-    "Max 3 sentences. Push back on excuses. Apply controllable test immediately.\n"+
-    "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"} for small changes.\n"+
-    "REBUILD_NEEDED if something major changed.\n"+
-    "HABIT_HIT:<name> or HABIT_MISS:<name> if user reports on a habit.";
+    "Bedrock: "+bedrock+"\nHabits: "+habits+"\n"+
+    (examMode?"Exam mode: "+examMode.name+" in "+examMode.daysOut+" days.\n":"")+
+    "Schedule: "+ctx+"\nTime: "+timeStr()+"\n"+
+    "Max 3 sentences. Push back on excuses immediately.\n"+
+    "If user says they have an exam and days away: output EXAM_MODE:{\"name\":\"subject\",\"daysOut\":7}\n"+
+    "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"}\n"+
+    "HABIT_HIT:<name> or HABIT_MISS:<name>\n"+
+    "REBUILD_NEEDED if major change requested.\n"+
+    "BEDROCK_UPDATE:[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"\",\"type\":\"\"}] if user wants to change their bedrock.";
 }
 
 function detectPatterns(logs){
   if(!logs||!logs.length)return [];
   const p=[],l3=logs.slice(-3);
-  if(l3.length>=3&&l3.every(l=>l.punishments>0))p.push("Punishments 3 days in a row — something is not working. Check if bedrock is realistic.");
-  if(l3.length>=3&&l3.every(l=>l.completed<l.total))p.push("Not completing bedrock 3+ days — avoidance pattern or blocks need adjusting.");
-  if(l3.length>=3&&l3.every(l=>l.streak===0))p.push("Streak at zero 3+ days — focus only on the single most important block today.");
+  if(l3.length>=3&&l3.every(l=>l.punishments>0))p.push("Punishments 3 days running — check if bedrock is realistic");
+  if(l3.length>=3&&l3.every(l=>l.completed<l.total))p.push("Incomplete 3+ days — avoidance pattern forming");
+  if(l3.length>=3&&l3.every(l=>l.streak===0))p.push("Streak at zero — focus on single most important block only");
+  const dayMap={};
+  logs.forEach(l=>{if(l.completed<l.total){const d=new Date(l.date).toLocaleDateString([],{weekday:"long"});dayMap[d]=(dayMap[d]||0)+1;}});
+  Object.entries(dayMap).forEach(([day,count])=>{if(count>=2)p.push(day+" is a recurring problem day");});
   return p;
 }
 
-function Header({mode,streak}){
+function Header({mode,streak,phase,examMode}){
   const [now,setNow]=useState(timeStr());
   useEffect(()=>{const t=setInterval(()=>setNow(timeStr()),1000);return()=>clearInterval(t);},[]);
   const modeLabel={morning:"Morning",executing:"Executing",audit:"Audit"};
   const modeBg={morning:C.accentFaint,executing:"#0a120a",audit:"#120a10"};
   return(
-    <div style={{background:modeBg[mode],borderBottom:"1px solid "+C.border,padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}>
+    <div style={{background:modeBg[mode],borderBottom:"1px solid "+C.border,padding:"13px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
         <div>
           <div style={{color:C.accent,fontSize:11,fontWeight:600,letterSpacing:1,textTransform:"uppercase"}}>{modeLabel[mode]}</div>
           <div style={{color:C.textDim,fontSize:11,marginTop:2}}>{dateStr()}</div>
         </div>
+        <div style={{display:"flex",gap:6}}>
+          <div style={{background:"#1a1400",border:"1px solid "+C.accentDim,borderRadius:3,padding:"2px 7px",fontSize:9,color:C.accentDim,letterSpacing:1}}>{"P"+phase}</div>
+          {examMode&&<div style={{background:"#2a1000",border:"1px solid #5a2a00",borderRadius:3,padding:"2px 7px",fontSize:9,color:"#c86420",letterSpacing:1}}>{"EXAM "+examMode.daysOut+"d"}</div>}
+        </div>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:12}}>
-        {streak>0&&<div style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:4,padding:"3px 8px",fontSize:11,color:C.accent}}>{"🔥 "+streak}</div>}
-        <div style={{color:C.text,fontSize:22,fontWeight:700,fontVariantNumeric:"tabular-nums",fontFamily:"monospace"}}>{now}</div>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {streak>0&&<div style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:4,padding:"3px 8px",fontSize:11,color:C.accent}}>{"🔥"+streak}</div>}
+        <div style={{color:C.text,fontSize:21,fontWeight:700,fontVariantNumeric:"tabular-nums",fontFamily:"monospace"}}>{now}</div>
       </div>
     </div>
   );
@@ -125,15 +155,7 @@ function Header({mode,streak}){
 
 function ScheduleBlock({block,state}){
   const isCur=state==="current",isPast=state==="past";
-  const ts={
-    routine:{bg:C.routine,bl:C.routineBorder,lbl:"ROUTINE"},
-    study:{bg:C.study,bl:C.studyBorder,lbl:"STUDY"},
-    meal:{bg:C.meal,bl:C.mealBorder,lbl:"MEAL"},
-    movement:{bg:C.movement,bl:C.movementBorder,lbl:"MOVE"},
-    free:{bg:C.free,bl:C.freeBorder,lbl:"FREE"},
-    sleep:{bg:C.sleep,bl:C.sleepBorder,lbl:"SLEEP"},
-    buffer:{bg:C.buffer,bl:C.bufferBorder,lbl:""},
-  }[block.type]||{bg:"transparent",bl:C.borderLight,lbl:""};
+  const ts={routine:{bg:C.routine,bl:C.routineBorder,lbl:"ROUTINE"},study:{bg:C.study,bl:C.studyBorder,lbl:"STUDY"},meal:{bg:C.meal,bl:C.mealBorder,lbl:"MEAL"},movement:{bg:C.movement,bl:C.movementBorder,lbl:"MOVE"},free:{bg:C.free,bl:C.freeBorder,lbl:"FREE"},sleep:{bg:C.sleep,bl:C.sleepBorder,lbl:"SLEEP"},buffer:{bg:C.buffer,bl:C.bufferBorder,lbl:""}}[block.type]||{bg:"transparent",bl:C.borderLight,lbl:""};
   return(
     <div style={{padding:isCur?"9px 12px":"6px 12px",borderRadius:6,marginBottom:2,background:isCur?"#1e1c18":ts.bg,borderLeft:"2px solid "+(isCur?C.accent:ts.bl),opacity:isPast?0.25:1}}>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -152,20 +174,16 @@ function ScheduleBlock({block,state}){
 function SchedulePanel({blocks}){
   const ref=useRef(null);
   const ci=getCurIdx(blocks);
-  useEffect(()=>{
-    if(ref.current&&ci>=0){const els=ref.current.querySelectorAll("[data-idx]");if(els[ci])els[ci].scrollIntoView({block:"center",behavior:"smooth"});}
-  },[ci,blocks.length]);
+  useEffect(()=>{if(ref.current&&ci>=0){const els=ref.current.querySelectorAll("[data-idx]");if(els[ci])els[ci].scrollIntoView({block:"center",behavior:"smooth"});}},[ci,blocks.length]);
   return(
-    <div style={{width:280,flexShrink:0,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",background:C.surface}}>
-      <div style={{padding:"10px 12px 6px",borderBottom:"1px solid "+C.borderLight,flexShrink:0}}>
+    <div style={{width:270,flexShrink:0,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",background:C.surface}}>
+      <div style={{padding:"9px 12px 6px",borderBottom:"1px solid "+C.borderLight,flexShrink:0}}>
         <span style={{color:C.textDim,fontSize:9,letterSpacing:2,textTransform:"uppercase"}}>Bedrock Schedule</span>
       </div>
       <div ref={ref} style={{flex:1,overflowY:"auto",padding:"6px 4px"}}>
         {!blocks.length
-          ?<div style={{padding:"20px 12px",color:C.textFaint,fontSize:11,textAlign:"center",lineHeight:1.8}}>Building your schedule…</div>
-          :blocks.map((b,i)=>(
-            <div key={i} data-idx={i}><ScheduleBlock block={b} state={i===ci?"current":i<ci?"past":"future"}/></div>
-          ))
+          ?<div style={{padding:"20px 12px",color:C.textFaint,fontSize:11,textAlign:"center",lineHeight:1.8}}>Building…</div>
+          :blocks.map((b,i)=><div key={i} data-idx={i}><ScheduleBlock block={b} state={i===ci?"current":i<ci?"past":"future"}/></div>)
         }
       </div>
     </div>
@@ -187,12 +205,7 @@ function ChatPanel({messages,loading,feedRef}){
     <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"flex",flexDirection:"column",gap:12}}>
       {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your coach is ready.</div>}
       {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
-      {loading&&(
-        <div style={{alignSelf:"flex-start"}}>
-          <div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div>
-          <div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div>
-        </div>
-      )}
+      {loading&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
     </div>
   );
 }
@@ -200,23 +213,20 @@ function ChatPanel({messages,loading,feedRef}){
 function InputBar({value,onChange,onSend,disabled,placeholder}){
   return(
     <div style={{borderTop:"1px solid "+C.border,padding:"12px 20px",background:C.surface,display:"flex",gap:10,flexShrink:0}}>
-      <input
-        style={{flex:1,background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:14,outline:"none",fontFamily:"inherit"}}
-        placeholder={placeholder||"Talk to your coach…"}
-        value={value}
+      <input style={{flex:1,background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:14,outline:"none",fontFamily:"inherit"}}
+        placeholder={placeholder||"Talk to your coach…"} value={value}
         onChange={e=>onChange(e.target.value)}
         onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey)onSend();}}
         disabled={disabled}
         onFocus={e=>e.target.style.borderColor=C.accentDim}
-        onBlur={e=>e.target.style.borderColor=C.border}
-      />
+        onBlur={e=>e.target.style.borderColor=C.border}/>
       <button onClick={onSend} disabled={disabled} style={{background:C.accent,color:"#000",border:"none",borderRadius:8,width:44,fontSize:16,fontWeight:700,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.5:1,flexShrink:0}}>↑</button>
     </div>
   );
 }
 
 function Onboarding({onComplete}){
-  const [messages,setMessages]=useState([{role:"ai",text:"Let's set up your bedrock. I'm not going to design your schedule for you — you're going to tell me what you've committed to, and I'll hold you to it.\n\nWhat's your name?"}]);
+  const [messages,setMessages]=useState([{role:"ai",text:"Let's build your bedrock. I'll learn about your life, design a schedule, and you tell me what stays and what changes.\n\nWhat's your name?"}]);
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const conv=useRef([]);
@@ -230,14 +240,21 @@ function Onboarding({onComplete}){
     conv.current=[...conv.current,{role:"user",content:msg}];
     setLoading(true);
     try{
-      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:800,system:ONBOARDING_SYSTEM,messages:conv.current})});
+      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,system:ONBOARDING_SYSTEM,messages:conv.current})});
       const d=await r.json();
       const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
       conv.current=[...conv.current,{role:"assistant",content:raw}];
       const match=raw.match(/<PROFILE>([\s\S]*?)<\/PROFILE>/);
       if(match){
-        try{const p=JSON.parse(match[1].trim());await sSet(SK.profile,p);onComplete(p);return;}
-        catch(e){console.error("profile parse",e);}
+        try{
+          const p=JSON.parse(match[1].trim());
+          p.phaseStartDate=todayStr();
+          p.weeklyReflectionDue=getMondayStr();
+          const reviewDate=new Date();reviewDate.setDate(reviewDate.getDate()+21);
+          p.bedrockReviewDue=reviewDate.toDateString();
+          await sSet(SK.profile,p);
+          onComplete(p);return;
+        }catch(e){console.error("profile parse",e);}
       }
       setMessages(m=>[...m,{role:"ai",text:raw.replace(/<PROFILE>[\s\S]*?<\/PROFILE>/g,"").trim()}]);
     }catch(e){setMessages(m=>[...m,{role:"ai",text:"Connection error. Try again."}]);}
@@ -247,20 +264,12 @@ function Onboarding({onComplete}){
   return(
     <div style={{height:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
       <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,background:C.surface,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div>
-          <div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase"}}>Coach</div>
-          <div style={{color:C.textMid,fontSize:12,marginTop:2}}>Setting up your bedrock</div>
-        </div>
+        <div><div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase"}}>Coach</div><div style={{color:C.textMid,fontSize:12,marginTop:2}}>Designing your bedrock</div></div>
         <div style={{color:C.textDim,fontSize:11}}>{dateStr()}</div>
       </div>
       <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"20px",display:"flex",flexDirection:"column",gap:12,maxWidth:700,width:"100%",margin:"0 auto",boxSizing:"border-box"}}>
         {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
-        {loading&&(
-          <div style={{alignSelf:"flex-start"}}>
-            <div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div>
-            <div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div>
-          </div>
-        )}
+        {loading&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
       </div>
       <div style={{borderTop:"1px solid "+C.border,padding:"12px 20px",background:C.surface,flexShrink:0}}>
         <div style={{maxWidth:700,margin:"0 auto",display:"flex",gap:10}}>
@@ -296,8 +305,9 @@ function MainScreen({profile:initProfile}){
       const alreadyAudited=l&&l.find(e=>e.date===todayStr());
       const hasSchedule=s&&s.date===todayStr()&&s.blocks&&s.blocks.length;
       if(m==="audit"&&!alreadyAudited){triggerAudit(l||[],s?s.blocks:[]);}
-      else if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Your schedule is set. Stay on it."}]);}
-      else{autoBuild(l||[]);}
+      else if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Schedule loaded. Stay on it."}]);}
+      else if((initProfile.phase||1)===1){autoBuild(l||[]);}
+      else{setMessages([{role:"ai",text:"Phase 2 — you own your schedule. Talk to me if you need anything."}]);}
     });
   },[]);
 
@@ -315,7 +325,7 @@ function MainScreen({profile:initProfile}){
     setLoading(true);
     setMessages([{role:"ai",text:"Building your schedule…"}]);
     try{
-      const raw=await claudeCall([{role:"user",content:"Build today's schedule. Time: "+timeStr()+". Date: "+dateStr()+". Use my bedrock commitments. Build from now until sleep."}],buildDayPrompt(initProfile,existingLog));
+      const raw=await claudeCall([{role:"user",content:"Build today's schedule. Time: "+timeStr()+". Date: "+dateStr()+". Use my bedrock. Build from now until sleep."}],buildDayPrompt(initProfile,existingLog));
       const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
       if(sm){try{const bl=JSON.parse(sm[1].trim());setSchedule(bl);await sSet(SK.schedule,{date:todayStr(),blocks:bl});}catch(e){console.error(e);}}
       const clean=raw.replace(/<SCHEDULE>[\s\S]*?<\/SCHEDULE>/g,"").trim();
@@ -349,18 +359,17 @@ function MainScreen({profile:initProfile}){
           try{
             const entry=JSON.parse(am[1].trim());
             const nl=[...log,entry];setLog(nl);await sSet(SK.log,nl);
-            const allDone=entry.completed>=entry.total&&entry.punishments===0;
-            const ns=allDone?(profile.streak||0)+1:0;
+            const allGood=entry.completed>=entry.total&&entry.punishments===0;
+            const ns=allGood?(profile.streak||0)+1:0;
             const np={...profile,streak:ns};
-            if(entry.habitUpdates){
+            if(entry.advancePhase&&np.phase===1)np.phase=2;
+            if(np.examMode&&np.examMode.daysOut>0){np.examMode={...np.examMode,daysOut:np.examMode.daysOut-1};}
+            if(np.examMode&&np.examMode.daysOut<=0)np.examMode=null;
+            if(entry.habitUpdates&&entry.habitUpdates.length){
               np.habits=(np.habits||[]).map(h=>{
                 const u=entry.habitUpdates.find(x=>x.name===h.name);
                 if(!u)return h;
-                if(u.hit){
-                  const s=(h.streak||0)+1;
-                  const tighten=s>0&&s%3===0;
-                  return {...h,streak:s,target:tighten?Math.round(parseFloat(h.target)*0.85*10)/10:h.target};
-                }
+                if(u.hit){const s=(h.streak||0)+1;return {...h,streak:s,target:s%3===0?String(Math.round(parseFloat(h.target)*0.85*10)/10):h.target};}
                 return {...h,streak:0,target:h.baseline};
               });
             }
@@ -372,23 +381,26 @@ function MainScreen({profile:initProfile}){
         const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:buildCoachPrompt(profile,schedule),message:msg})});
         const d=await r.json();
         const raw=d.content||"";
-        if(raw.includes("REBUILD_NEEDED")){
-          conv.current=[];await sSet(SK.schedule,{date:todayStr(),blocks:[]});
-          setMessages(m=>[...m,{role:"ai",text:"Rebuilding…"}]);
-          setLoading(false);await autoBuild(log);return;
-        }
-        const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
-        if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:todayStr(),blocks:nb});}catch(e){console.error(e);}}
-        const hh=raw.match(/HABIT_HIT:(\S+)/);const hm=raw.match(/HABIT_MISS:(\S+)/);
+        const np={...profile};
+        let changed=false;
+        const em=raw.match(/EXAM_MODE:(\{[^}]+\})/);
+        if(em){try{np.examMode=JSON.parse(em[1]);changed=true;}catch(e){console.error(e);}}
+        const bu=raw.match(/BEDROCK_UPDATE:(\[[\s\S]*?\])/);
+        if(bu){try{np.bedrock=JSON.parse(bu[1]);changed=true;}catch(e){console.error(e);}}
+        const hh=raw.match(/HABIT_HIT:(\S+)/),hm=raw.match(/HABIT_MISS:(\S+)/);
         if(hh||hm){
-          const np={...profile,habits:(profile.habits||[]).map(h=>{
-            if(hh&&h.name.toLowerCase().includes(hh[1].toLowerCase())){const s=(h.streak||0)+1;return {...h,streak:s,target:s%3===0?Math.round(parseFloat(h.target)*0.85*10)/10:h.target};}
+          np.habits=(np.habits||[]).map(h=>{
+            if(hh&&h.name.toLowerCase().includes(hh[1].toLowerCase())){const s=(h.streak||0)+1;return {...h,streak:s,target:s%3===0?String(Math.round(parseFloat(h.target)*0.85*10)/10):h.target};}
             if(hm&&h.name.toLowerCase().includes(hm[1].toLowerCase()))return {...h,streak:0,target:h.baseline};
             return h;
-          })};
-          await saveProfile(np);
+          });
+          changed=true;
         }
-        const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/REBUILD_NEEDED/g,"").replace(/HABIT_HIT:\S+|HABIT_MISS:\S+/g,"").trim();
+        if(changed)await saveProfile(np);
+        if(raw.includes("REBUILD_NEEDED")){conv.current=[];await sSet(SK.schedule,{date:todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Rebuilding…"}]);setLoading(false);await autoBuild(log);return;}
+        const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
+        if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:todayStr(),blocks:nb});}catch(e){console.error(e);}}
+        const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/EXAM_MODE:[^\n]*/g,"").replace(/BEDROCK_UPDATE:[\s\S]*?\]/g,"").replace(/HABIT_HIT:\S+|HABIT_MISS:\S+|REBUILD_NEEDED/g,"").trim();
         if(clean)setMessages(m=>[...m,{role:"ai",text:clean}]);
       }
     }catch(e){console.error(e);setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
@@ -398,7 +410,7 @@ function MainScreen({profile:initProfile}){
   const ph=mode==="audit"?"Report in…":"Talk to your coach…";
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header mode={mode} streak={profile.streak||0}/>
+      <Header mode={mode} streak={profile.streak||0} phase={profile.phase||1} examMode={profile.examMode||null}/>
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
         <SchedulePanel blocks={schedule}/>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
