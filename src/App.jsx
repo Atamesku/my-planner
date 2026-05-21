@@ -6,7 +6,14 @@ const GROQ_API="/api/groq";
 function todayStr(){return new Date().toDateString();}
 function timeStr(){return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});}
 function dateStr(){return new Date().toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"});}
-function getMode(){const h=new Date().getHours();return h<12?"morning":h<20?"executing":"audit";}
+function getMode(){
+  const h=new Date().getHours();
+  return h<12?"morning":h<20?"executing":"audit";
+}
+function isLateNight(){
+  const h=new Date().getHours();
+  return h>=20;
+}
 function toMins(t){const [h,m]=t.split(":").map(Number);return h*60+m;}
 function nowMins(){const n=new Date();return n.getHours()*60+n.getMinutes();}
 function getCurIdx(blocks){const now=nowMins();let idx=-1;for(let i=0;i<blocks.length;i++){if(toMins(blocks[i].time)<=now)idx=i;else break;}return idx;}
