@@ -110,17 +110,22 @@ function buildCoachPrompt(profile,schedule){
   const habits=(profile.habits||[]).map(h=>h.name+" target "+h.target+h.unit).join(", ");
   const ctx=(schedule||[]).map((b,i)=>"["+i+"] "+b.time+"-"+b.end+" "+b.title).join(" | ");
   const examMode=profile.examMode;
+  const fixedEvents=(profile.fixedEvents||[]).map(e=>e.day+" "+e.time+" "+e.title).join(", ")||"none";
   return "Accountability coach for "+(profile.name||"user")+". Streak: "+(profile.streak||0)+"d. Phase: "+(profile.phase||1)+".\n"+
     ENFORCE_RULES+"\n"+
-    "Bedrock: "+bedrock+"\nHabits: "+habits+"\n"+
+    "Bedrock: "+bedrock+"\nHabits: "+habits+"\nFixed events: "+fixedEvents+"\n"+
     (examMode?"Exam mode: "+examMode.name+" in "+examMode.daysOut+" days.\n":"")+
     "Schedule: "+ctx+"\nTime: "+timeStr()+"\n"+
-    "Max 3 sentences. Push back on excuses immediately.\n"+
-    "If user says they have an exam and days away: output EXAM_MODE:{\"name\":\"subject\",\"daysOut\":7}\n"+
+    "Max 3 sentences. Push back on excuses immediately.\n\n"+
+    "IMPORTANT — PROFILE UPDATES:\n"+
+    "If the user tells you anything new about their life (work days, class times, fixed events, new habits, schedule changes) — capture it and output:\n"+
+    "PROFILE_UPDATE:{\"fixedEvents\":[{\"day\":\"monday\",\"time\":\"HH:MM\",\"title\":\"Work\"}],\"notes\":\"anything else learned\"}\n"+
+    "Always output this when you learn something new. Never silently discard information.\n\n"+
+    "If user says they have an exam and days away: EXAM_MODE:{\"name\":\"subject\",\"daysOut\":7}\n"+
     "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"}\n"+
     "HABIT_HIT:<name> or HABIT_MISS:<name>\n"+
-    "REBUILD_NEEDED if major change requested.\n"+
-    "BEDROCK_UPDATE:[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"\",\"type\":\"\"}] if user wants to change their bedrock.";
+    "REBUILD_NEEDED if major change or user asks to build/rebuild schedule.\n"+
+    "BEDROCK_UPDATE:[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"\",\"type\":\"\"}] if user wants to change bedrock.";
 }
 
 function detectPatterns(logs){
@@ -310,8 +315,9 @@ function MainScreen({profile:initProfile}){
       if(l)setLog(l);
       const m=getMode();
       const alreadyAudited=l&&l.find(e=>e.date===todayStr());
-      const hasSchedule=s&&s.date===todayStr()&&s.blocks&&s.blocks.length;
-      if(m==="audit"&&!alreadyAudited){triggerAudit(l||[],s?s.blocks:[]);}
+      const tomorrow=(()=>{const d=new Date();d.setDate(d.getDate()+1);return d.toDateString();})();
+      const hasSchedule=s&&(s.date===todayStr()||s.date===tomorrow)&&s.blocks&&s.blocks.length;
+      if(m==="audit"&&!alreadyAudited&&!isLateNight()){triggerAudit(l||[],s?s.blocks:[]);}
       else if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Schedule loaded. Stay on it."}]);}
       else if((initProfile.phase||1)===1){autoBuild(l||[]);}
       else{setMessages([{role:"ai",text:"Phase 2 — you own your schedule. Talk to me if you need anything."}]);}
@@ -330,13 +336,19 @@ function MainScreen({profile:initProfile}){
 
   async function autoBuild(existingLog){
     setLoading(true);
-    setMessages([{role:"ai",text:"Building your schedule…"}]);
+    const buildingTomorrow=isLateNight();
+    const targetDate=buildingTomorrow?(()=>{const d=new Date();d.setDate(d.getDate()+1);return d.toDateString();})():todayStr();
+    const targetDateStr=buildingTomorrow?(()=>{const d=new Date();d.setDate(d.getDate()+1);return d.toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"});})():dateStr();
+    setMessages([{role:"ai",text:buildingTomorrow?"Building tomorrow's schedule…":"Building your schedule…"}]);
     try{
-      const raw=await claudeCall([{role:"user",content:"Build today's schedule. Time: "+timeStr()+". Date: "+dateStr()+". Use my bedrock. Build from now until sleep."}],buildDayPrompt(initProfile,existingLog));
+      const prompt=buildingTomorrow
+        ?"Build tomorrow's schedule ("+targetDateStr+"). Start from wake time. Use my bedrock and fixed events."
+        :"Build today's schedule. Time: "+timeStr()+". Date: "+dateStr()+". Use my bedrock. Build from now until sleep.";
+      const raw=await claudeCall([{role:"user",content:prompt}],buildDayPrompt(initProfile,existingLog));
       const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
-      if(sm){try{const bl=JSON.parse(sm[1].trim());setSchedule(bl);await sSet(SK.schedule,{date:todayStr(),blocks:bl});}catch(e){console.error(e);}}
+      if(sm){try{const bl=JSON.parse(sm[1].trim());setSchedule(bl);await sSet(SK.schedule,{date:targetDate,blocks:bl});}catch(e){console.error(e);}}
       const clean=raw.replace(/<SCHEDULE>[\s\S]*?<\/SCHEDULE>/g,"").trim();
-      setMessages([{role:"ai",text:clean||"Schedule built. Stay on it."}]);
+      setMessages([{role:"ai",text:clean||(buildingTomorrow?"Tomorrow's schedule is set.":"Schedule built. Stay on it.")}]);
     }catch(e){console.error(e);setMessages([{role:"ai",text:"Failed to build. Talk to me."}]);}
     setLoading(false);
   }
@@ -403,8 +415,27 @@ function MainScreen({profile:initProfile}){
           });
           changed=true;
         }
+        const pu=raw.match(/PROFILE_UPDATE:(\{[\s\S]*?\})/);
+        if(pu){
+          try{
+            const u=JSON.parse(pu[1]);
+            const np2={...np};
+            if(u.fixedEvents){np2.fixedEvents=[...new Set([...(np2.fixedEvents||[]),...u.fixedEvents])];}
+            if(u.notes)np2.notes=(np2.notes?np2.notes+". ":"")+u.notes;
+            Object.assign(np,np2);
+            changed=true;
+          }catch(e){console.error("profile update parse",e);}
+        }
         if(changed)await saveProfile(np);
-        if(raw.includes("REBUILD_NEEDED")){conv.current=[];await sSet(SK.schedule,{date:todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Rebuilding…"}]);setLoading(false);await autoBuild(log);return;}
+        if(raw.includes("REBUILD_NEEDED")){
+          conv.current=[];
+          const tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);
+          const buildDate=isLateNight()?tomorrow.toDateString():todayStr();
+          await sSet(SK.schedule,{date:buildDate,blocks:[]});
+          const msg2=isLateNight()?"Building tomorrow's schedule…":"Rebuilding…";
+          setMessages(m=>[...m,{role:"ai",text:msg2}]);
+          setLoading(false);await autoBuild(log);return;
+        }
         const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
         if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:todayStr(),blocks:nb});}catch(e){console.error(e);}}
         const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/EXAM_MODE:[^\n]*/g,"").replace(/BEDROCK_UPDATE:[\s\S]*?\]/g,"").replace(/HABIT_HIT:\S+|HABIT_MISS:\S+|REBUILD_NEEDED/g,"").trim();
