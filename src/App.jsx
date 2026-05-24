@@ -277,24 +277,38 @@ function CheckIn({onSubmit,type}){
   const [sleepTime,setSleepTime]=useState("");
   const [energy,setEnergy]=useState(3);
   const [chaos,setChaos]=useState(3);
+  const [onTrack,setOnTrack]=useState(true);
   const [notes,setNotes]=useState("");
   const energyLabels=["","Very low","Low","Okay","Good","Sharp"];
   const chaosLabels=["","Very stable","Mostly stable","Some disruption","Chaotic","Total chaos"];
 
   return(
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"16px",margin:"8px 0",display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{color:C.accent,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>{type==="morning"?"Morning Check-in":"Evening Report"}</div>
-      {type==="morning"?(
+      <div style={{color:C.accent,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>
+        {type==="morning"?"Morning Check-in":type==="afternoon"?"Afternoon Check-in":"Evening Report"}
+      </div>
+      {type==="morning"&&(
         <div>
           <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time did you wake up?</div>
           <input value={wakeTime} onChange={e=>setWakeTime(e.target.value)} placeholder="e.g. 08:30"
             style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
         </div>
-      ):(
+      )}
+      {type==="evening"&&(
         <div>
           <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time are you sleeping?</div>
           <input value={sleepTime} onChange={e=>setSleepTime(e.target.value)} placeholder="e.g. 23:30"
             style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+      )}
+      {type==="afternoon"&&(
+        <div>
+          <div style={{color:C.textDim,fontSize:11,marginBottom:8}}>Are you on track with your schedule?</div>
+          <div style={{display:"flex",gap:8}}>
+            {["Yes, on track","Slightly behind","Off track"].map(opt=>(
+              <button key={opt} onClick={()=>setOnTrack(opt)} style={{flex:1,padding:"7px 4px",background:onTrack===opt?C.accent:"#1a1814",border:"1px solid "+(onTrack===opt?C.accent:C.border),borderRadius:5,cursor:"pointer",color:onTrack===opt?"#000":C.textDim,fontSize:11}}>{opt}</button>
+            ))}
+          </div>
         </div>
       )}
       {[["Energy",energy,setEnergy,energyLabels],["Day chaos",chaos,setChaos,chaosLabels]].map(([label,val,set,labels])=>(
@@ -311,11 +325,14 @@ function CheckIn({onSubmit,type}){
         </div>
       ))}
       <div>
-        <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>Anything notable? (optional)</div>
-        <input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Classes, events, how you felt…"
+        <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>
+          {type==="afternoon"?"Anything that came up or changed?":"Anything notable? (optional)"}
+        </div>
+        <input value={notes} onChange={e=>setNotes(e.target.value)}
+          placeholder={type==="afternoon"?"e.g. class ran long, unexpected errand, low energy…":"e.g. classes, events, how you felt…"}
           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
       </div>
-      <button onClick={()=>onSubmit({wakeTime,sleepTime,energy,chaosLevel:chaos,notes,date:todayStr(),type})}
+      <button onClick={()=>onSubmit({wakeTime,sleepTime,energy,chaosLevel:chaos,onTrack,notes,date:todayStr(),type})}
         style={{background:C.accent,color:"#000",border:"none",borderRadius:6,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
         Submit
       </button>
@@ -537,10 +554,23 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
 
   async function handleCheckin(data){
     setShowCheckin(false);
-    const newObs=[...observations.filter(o=>o.date!==todayStr()),{...(observations.find(o=>o.date===todayStr())||{date:todayStr()}),...data}];
+    const existing=observations.find(o=>o.date===todayStr())||{date:todayStr()};
+    const merged={...existing,...data};
+    if(data.type==="afternoon")merged.afternoonDone=true;
+    const newObs=[...observations.filter(o=>o.date!==todayStr()),merged];
     setObservations(newObs);
     await sSet(SK.observations,newObs);
-    setMessages(m=>[...m,{role:"ai",text:"Logged. Energy "+data.energy+"/5."}]);
+    let msg="";
+    if(data.type==="morning")msg="Morning logged. Energy "+data.energy+"/5.";
+    else if(data.type==="afternoon"){
+      msg="Afternoon logged. Energy "+data.energy+"/5.";
+      if(data.onTrack!=="Yes, on track"){
+        msg+=" You're "+data.onTrack.toLowerCase()+". Readjusting your schedule…";
+        setTimeout(()=>autoBuild(log),500);
+      }
+    }
+    else msg="Evening logged. Rest well.";
+    setMessages(m=>[...m,{role:"ai",text:msg}]);
   }
 
   async function send(){
@@ -600,6 +630,10 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
   }
 
   const todayObs=observations.find(o=>o.date===todayStr());
+  const hasMorning=todayObs&&todayObs.wakeTime;
+  const hasAfternoon=todayObs&&todayObs.afternoonDone;
+  const hasEvening=todayObs&&todayObs.sleepTime;
+  const isAfternoon=()=>{const h=new Date().getHours();return h>=12&&h<18;};
   const ph=mode==="audit"?"Report in…":"Talk to your coach…";
 
   return(
@@ -612,9 +646,13 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
             {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your coach is ready.</div>}
             {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
             {loading&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
-            {showCheckin&&<CheckIn onSubmit={handleCheckin} type={mode==="morning"?"morning":"evening"}/>}
-            {!showCheckin&&!todayObs&&mode==="morning"&&(
-              <button onClick={()=>setShowCheckin(true)} style={{alignSelf:"flex-start",background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Quick check-in</button>
+            {showCheckin&&<CheckIn onSubmit={handleCheckin} type={showCheckin}/>}
+            {!showCheckin&&(
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {!hasMorning&&mode==="morning"&&<button onClick={()=>setShowCheckin("morning")} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
+                {hasMorning&&!hasAfternoon&&isAfternoon()&&<button onClick={()=>setShowCheckin("afternoon")} style={{background:"#0a0e14",border:"1px solid #1a2a3a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8aaa",cursor:"pointer"}}>Afternoon check-in</button>}
+                {hasMorning&&!hasEvening&&mode==="audit"&&<button onClick={()=>setShowCheckin("evening")} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
+              </div>
             )}
           </div>
           <InputBar value={input} onChange={setInput} onSend={send} disabled={loading} placeholder={ph}/>
