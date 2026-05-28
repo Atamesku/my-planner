@@ -391,8 +391,11 @@ function ObservationScreen({profile,observations,onUpdate}){
   const conv=useRef([]);
   const todayObs=observations.find(o=>o.date===todayStr());
   const hasMorning=todayObs&&todayObs.wakeTime;
+  const hasAfternoon=todayObs&&todayObs.afternoonDone;
   const hasEvening=todayObs&&todayObs.sleepTime;
-  const daysObserved=observations.length;
+  const obsHour=new Date().getHours();
+  const isAfternoonTime=obsHour>=12&&obsHour<20;
+  const isEveningTime=obsHour>=20;
   const readyToAnalyze=daysObserved>=7;
 
   useEffect(()=>{
@@ -408,10 +411,16 @@ function ObservationScreen({profile,observations,onUpdate}){
 
   async function handleCheckin(data){
     setShowCheckin(false);
-    const newObs=[...observations.filter(o=>o.date!==todayStr()),{...todayObs,...data}];
+    const existing=observations.find(o=>o.date===todayStr())||{date:todayStr()};
+    const merged={...existing,...data};
+    if(data.type==="afternoon")merged.afternoonDone=true;
+    const newObs=[...observations.filter(o=>o.date!==todayStr()),merged];
     await sSet(SK.observations,newObs);
     onUpdate({observations:newObs});
-    setMessages(m=>[...m,{role:"ai",text:data.type==="morning"?"Morning logged. Energy "+data.energy+"/5. Chaos "+data.chaosLevel+"/5. See you tonight.":"Evening logged. Rest well. Check in tomorrow morning."}]);
+    const msg=data.type==="morning"?"Morning logged. Energy "+data.energy+"/5. Chaos "+data.chaosLevel+"/5. See you tonight."
+      :data.type==="afternoon"?"Afternoon logged. Energy "+data.energy+"/5."
+      :"Evening logged. Rest well. Check in tomorrow morning.";
+    setMessages(m=>[...m,{role:"ai",text:msg}]);
   }
 
   async function runAnalysis(){
@@ -467,7 +476,7 @@ function ObservationScreen({profile,observations,onUpdate}){
             {!showCheckin&&(
               <div style={{display:"flex",gap:8,marginTop:4}}>
                 {!hasMorning&&<button onClick={()=>{setCheckinType("morning");setShowCheckin(true);}} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
-                {hasMorning&&!hasEvening&&<button onClick={()=>{setCheckinType("evening");setShowCheckin(true);}} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
+                {hasMorning&&!hasEvening&&new Date().getHours()>=20&&<button onClick={()=>{setCheckinType("evening");setShowCheckin(true);}} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
                 {readyToAnalyze&&!analyzing&&<button onClick={runAnalysis} style={{background:C.accent,border:"none",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#000",fontWeight:700,cursor:"pointer"}}>Build my schedule →</button>}
               </div>
             )}
@@ -503,8 +512,7 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
       const alreadyAudited=l&&l.find(e=>e.date===todayStr());
       const targetDate=isLateNight()?tomorrowStr():todayStr();
       const hasSchedule=s&&s.date===targetDate&&s.blocks&&s.blocks.length;
-      if(mode==="audit"&&!alreadyAudited&&!isLateNight()){triggerAudit(l||[],s?s.blocks:[]);}
-      else if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Schedule loaded. "+timeStr()+" — "+getCurrentBlockMsg(s.blocks)}]);}
+      if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Schedule loaded. "+timeStr()+" — "+getCurrentBlockMsg(s.blocks)}]);}
       else{autoBuild(l||[]);}
     });
   },[]);
