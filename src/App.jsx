@@ -51,27 +51,27 @@ const C={
 function buildAnalysisPrompt(profile,observations){
   const obsStr=observations.map(o=>
     "Date: "+o.date+" ("+dayName(o.date)+")\n"+
-    "  Wake: "+o.wakeTime+" | Sleep: "+o.sleepTime+" | Energy: "+o.energy+"/5\n"+
-    "  Chaos: "+o.chaosLevel+"/5 | Completed planned: "+(o.completedPlanned?"yes":"no")+"\n"+
-    "  Notes: "+o.notes
+    "  Wake: "+(o.wakeTime||"unknown")+" | Sleep: "+(o.sleepTime||"unknown")+" | Energy: "+(o.energy||"?")+"/5\n"+
+    "  Chaos: "+(o.chaosLevel||"?")+"/5 | Notes: "+(o.notes||"none")
   ).join("\n\n");
-
   return "You are analysing "+profile.name+"'s behaviour data to build their personalised bedrock schedule.\n\n"+
     "OBSERVATIONS ("+observations.length+" days):\n"+obsStr+"\n\n"+
-    "ANALYSE AND IDENTIFY:\n"+
-    "1. Typical wake time range and optimal wake time\n"+
-    "2. Typical sleep time and whether it is consistent\n"+
-    "3. Peak energy window — when are they sharpest based on their reports?\n"+
-    "4. Chaos level — how predictable are their days? Which days are most chaotic?\n"+
-    "5. Patterns — what do they consistently do or skip?\n"+
-    "6. Focus duration — based on what they report, how long can they realistically focus?\n\n"+
-    "Then propose a bedrock schedule. Be realistic — base it entirely on observed behaviour, not ideal behaviour.\n"+
-    "Present findings conversationally, then show the proposed bedrock as a clear list.\n"+
-    "Ask: what do you want to change, remove, or lock in?\n"+
-    "Once confirmed output:\n"+
+    "SUBJECTS: "+(profile.subjects||[]).join(", ")+"\n"+
+    "CONTEXT: "+(profile.context||"none")+"\n\n"+
+    "PHASE 1 — ANALYSE AND PROPOSE:\n"+
+    "Present what you observed (wake times, sleep, energy patterns, chaos level, which days are harder).\n"+
+    "Then propose a realistic bedrock schedule as a clear numbered list: TIME — BLOCK — DURATION.\n"+
+    "Be conservative — base it on observed behaviour, not ideal behaviour.\n"+
+    "Include: wake, morning routine, study blocks, meals, movement, free time, sleep.\n"+
+    "Ask: 'What do you want to change, remove, or lock in? Also mention any upcoming fixed commitments like classes or work.'\n\n"+
+    "PHASE 2 — WHEN USER CONFIRMS (they say 'good', 'ready', 'looks good', 'all good', 'confirmed', 'yes', 'build it', or similar):\n"+
+    "Incorporate any changes they mentioned including new classes or work schedule.\n"+
+    "Then IMMEDIATELY output the BEDROCK tag with NO text after it. Do not ask any more questions.\n"+
+    "Output exactly:\n"+
     "<BEDROCK>\n"+
-    "{\"wakeTime\":\"\",\"sleepTime\":\"\",\"peakEnergy\":\"\",\"chaosLevel\":3,\"focusMins\":25,\"bedrockBlocks\":[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"\",\"type\":\"routine|study|meal|movement|free|sleep\"}]}\n"+
-    "</BEDROCK>";
+    "{\"wakeTime\":\"HH:MM\",\"sleepTime\":\"HH:MM\",\"peakEnergy\":\"afternoon\",\"chaosLevel\":3,\"focusMins\":25,\"fixedEvents\":[{\"day\":\"monday\",\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Class\"}],\"bedrockBlocks\":[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Block name\",\"type\":\"routine|study|meal|movement|free|sleep\"}]}\n"+
+    "</BEDROCK>\n\n"+
+    "CRITICAL: If the user has confirmed even once, output the BEDROCK tag immediately. Do not loop. Do not ask again.";
 }
 
 function buildDayPrompt(profile,observations,log){
@@ -427,36 +427,55 @@ function ObservationScreen({profile,observations,onUpdate}){
     setAnalyzing(true);
     setMessages(m=>[...m,{role:"ai",text:"Analysing "+daysObserved+" days of data…"}]);
     try{
-      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,messages:[{role:"user",content:"Analyse my observation data and propose my bedrock schedule."}],system:buildAnalysisPrompt(profile,observations)})});
+      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations),messages:[{role:"user",content:"Analyse my data and propose my bedrock schedule."}]})});
       const d=await r.json();
       const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
-      conv.current=[{role:"user",content:"Analyse my observation data."},{role:"assistant",content:raw}];
+      conv.current=[{role:"user",content:"Analyse my data and propose my bedrock schedule."},{role:"assistant",content:raw}];
       const bedrockMatch=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
       if(bedrockMatch){
-        try{
-          const b=JSON.parse(bedrockMatch[1].trim());
-          const updated={...profile,...b,appMode:"active",activeSince:todayStr()};
-          await sSet(SK.profile,updated);
-          onUpdate({profile:updated,appMode:"active"});
-          return;
-        }catch(e){console.error(e);}
+        await applyBedrock(bedrockMatch[1]);return;
       }
-      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+daysObserved+" days of data…"),{role:"ai",text:raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim()}]);
+      const clean=raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim();
+      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+daysObserved+" days of data…"),{role:"ai",text:clean}]);
     }catch(e){setMessages(m=>[...m,{role:"ai",text:"Analysis failed. Try again."}]);}
     setAnalyzing(false);
   }
 
+  async function applyBedrock(json){
+    try{
+      const b=JSON.parse(json.trim());
+      const updated={...profile,...b,appMode:"active",activeSince:todayStr()};
+      await sSet(SK.profile,updated);
+      onUpdate({profile:updated,observations,appMode:"active"});
+    }catch(e){
+      console.error("bedrock parse error",e);
+      setMessages(m=>[...m,{role:"ai",text:"Failed to save bedrock. Try clicking Build my schedule again."}]);
+      setAnalyzing(false);
+    }
+  }
+
   async function send(){
-    if(!input.trim()||loading)return;
+    if(!input.trim()||loading||analyzing)return;
     const msg=input.trim();setInput("");
     setMessages(m=>[...m,{role:"user",text:msg}]);
     conv.current=[...conv.current,{role:"user",content:msg}];
-    if(msg.toLowerCase().includes("ready")||msg.toLowerCase().includes("build")||msg.toLowerCase().includes("go ahead")){
-      await runAnalysis();return;
+    if(msg.toLowerCase().match(/ready|build|go ahead|looks good|all good|seems good|confirmed|yes|good/)){
+      setAnalyzing(true);
+      try{
+        const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations),messages:conv.current})});
+        const d=await r.json();
+        const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
+        conv.current=[...conv.current,{role:"assistant",content:raw}];
+        const bedrockMatch=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
+        if(bedrockMatch){await applyBedrock(bedrockMatch[1]);return;}
+        const clean=raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim();
+        setMessages(m=>[...m,{role:"ai",text:clean||"Bedrock confirmed. Saving…"}]);
+      }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
+      setAnalyzing(false);return;
     }
     setLoading(true);
     try{
-      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"You are an accountability coach in observation mode for "+profile.name+". You are observing their patterns before building a schedule. Be encouraging but brief. If they ask about schedule or say they are ready, tell them to say 'ready' or you can build now. Days observed: "+daysObserved+"/7.",message:msg})});
+      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"You are an accountability coach in observation mode for "+profile.name+". Days observed: "+daysObserved+"/7. Be brief. If they confirm the schedule say you are saving it now.",message:msg})});
       const d=await r.json();
       setMessages(m=>[...m,{role:"ai",text:d.content||"Talk to me."}]);
     }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
