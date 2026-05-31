@@ -394,16 +394,17 @@ function ObservationScreen({profile,observations,onUpdate}){
   const obsHour=new Date().getHours();
   const isAfternoonTime=obsHour>=12&&obsHour<20;
   const isEveningTime=obsHour>=20;
-  const readyToAnalyze=DaysObserved>=7;
+  const readyToAnalyze=daysObserved>=7;
 
   useEffect(()=>{
     if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;
   },[messages,loading]);
 
   useEffect(()=>{
+    const n=daysObserved;
     const greeting=readyToAnalyze
-      ?"I've been watching for "+DaysObserved+" days. I have enough data to build your schedule. Ready when you are — just say the word."
-      :"Day "+DaysObserved+" of observation. "+(hasMorning&&!hasEvening?"Morning logged. Check in tonight before you sleep.":!hasMorning?"Check in below — won't take 30 seconds.":"Both check-ins done for today. See you tomorrow.");
+      ?"I've been watching for "+n+" days. I have enough data to build your schedule. Ready when you are — just say the word."
+      :"Day "+n+" of observation. "+(hasMorning&&!hasEvening?"Morning logged. Check in tonight before you sleep.":!hasMorning?"Check in below — won't take 30 seconds.":"Both check-ins done for today. See you tomorrow.");
     setMessages([{role:"ai",text:greeting}]);
   },[]);
 
@@ -423,7 +424,7 @@ function ObservationScreen({profile,observations,onUpdate}){
 
   async function runAnalysis(){
     setAnalyzing(true);
-    setMessages(m=>[...m,{role:"ai",text:"Analysing "+DaysObserved+" days of data…"}]);
+    setMessages(m=>[...m,{role:"ai",text:"Analysing "+daysObserved+" days of data…"}]);
     try{
       const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations),messages:[{role:"user",content:"Analyse my data and propose my bedrock schedule."}]})});
       const d=await r.json();
@@ -434,7 +435,7 @@ function ObservationScreen({profile,observations,onUpdate}){
         await applyBedrock(bedrockMatch[1]);return;
       }
       const clean=raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim();
-      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+DaysObserved+" days of data…"),{role:"ai",text:clean}]);
+      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+daysObserved+" days of data…"),{role:"ai",text:clean}]);
     }catch(e){setMessages(m=>[...m,{role:"ai",text:"Analysis failed. Try again."}]);}
     setAnalyzing(false);
   }
@@ -473,7 +474,7 @@ function ObservationScreen({profile,observations,onUpdate}){
     }
     setLoading(true);
     try{
-      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"You are an accountability coach in observation mode for "+profile.name+". Days observed: "+DaysObserved+"/7. Be brief. If they confirm the schedule say you are saving it now.",message:msg})});
+      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"You are an accountability coach in observation mode for "+profile.name+". Days observed: "+daysObserved+"/7. Be brief. If they confirm the schedule say you are saving it now.",message:msg})});
       const d=await r.json();
       setMessages(m=>[...m,{role:"ai",text:d.content||"Talk to me."}]);
     }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
@@ -482,7 +483,7 @@ function ObservationScreen({profile,observations,onUpdate}){
 
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="observing" mode={getMode()} streak={0} numDaysObserved={DaysObserved} examMode={null}/>
+      <Header appMode="observing" mode={getMode()} streak={0} numDaysObserved={daysObserved} examMode={null}/>
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
         <SchedulePanel blocks={[]} appMode="observing"/>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
