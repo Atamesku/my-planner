@@ -482,7 +482,7 @@ function ObservationScreen({profile,observations,onUpdate}){
 
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="observing" mode={getMode()} streak={0} daysObserved={daysObserved} examMode={null}/>
+      <Header appMode="observing" mode={getMode()} streak={0} numDaysObserved={daysObserved} examMode={null}/>
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
         <SchedulePanel blocks={[]} appMode="observing"/>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
@@ -663,7 +663,7 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
 
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="active" mode={mode} streak={profile.streak||0} daysObserved={0} examMode={profile.examMode||null}/>
+      <Header appMode="active" mode={mode} streak={profile.streak||0} numDaysObserved={0} examMode={profile.examMode||null}/>
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
         <SchedulePanel blocks={schedule} appMode="active"/>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
