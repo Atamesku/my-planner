@@ -8,13 +8,12 @@ function timeStr(){return new Date().toLocaleTimeString([],{hour:"2-digit",minut
 function dateStr(){return new Date().toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"});}
 function toMins(t){const [h,m]=t.split(":").map(Number);return h*60+m;}
 function nowMins(){const n=new Date();return n.getHours()*60+n.getMinutes();}
-function isLateNight(){return new Date().getHours()>=21;}
-function getMode(){const h=new Date().getHours();return h<12?"morning":h<20?"executing":"audit";}
+function isLateNight(){return new Date().getHours()>=22;}
+function getMode(){const h=new Date().getHours();return h<12?"morning":h<21?"executing":"audit";}
 function getCurIdx(blocks){const now=nowMins();let idx=-1;for(let i=0;i<blocks.length;i++){if(toMins(blocks[i].time)<=now)idx=i;else break;}return idx;}
 function tomorrowStr(){const d=new Date();d.setDate(d.getDate()+1);return d.toDateString();}
-function dayName(dateStr){return new Date(dateStr).toLocaleDateString([],{weekday:"long"});}
+function dayName(ds){return new Date(ds).toLocaleDateString([],{weekday:"long"});}
 
-// ── Storage ────────────────────────────────────────────
 const SK={profile:"cv6_profile",observations:"cv6_obs",schedule:"cv6_schedule",log:"cv6_log"};
 const mem={};
 async function sGet(key){
@@ -32,7 +31,6 @@ async function sSet(key,val){
   catch(e){console.error("sSet",e);}
 }
 
-// ── Colours ────────────────────────────────────────────
 const C={
   bg:"#0f0e0c",surface:"#161410",border:"#2a2520",borderLight:"#1e1c18",
   accent:"#c8922a",accentDim:"#7a5518",accentFaint:"#2a1f0a",
@@ -47,7 +45,6 @@ const C={
   obs:"#0a0e14",obsBorder:"#1a2a3a",
 };
 
-// ── Analysis prompt ────────────────────────────────────
 function buildAnalysisPrompt(profile,observations){
   const obsStr=observations.map(o=>
     "Date: "+o.date+" ("+dayName(o.date)+")\n"+
@@ -63,8 +60,8 @@ function buildAnalysisPrompt(profile,observations){
     "Then propose a realistic bedrock schedule as a clear numbered list: TIME — BLOCK — DURATION.\n"+
     "Be conservative — base it on observed behaviour, not ideal behaviour.\n"+
     "Include: wake, morning routine, study blocks, meals, movement, free time, sleep.\n"+
-    "Ask: 'What do you want to change, remove, or lock in? Also mention any upcoming fixed commitments like classes or work.'\n\n"+
-    "PHASE 2 — WHEN USER CONFIRMS (they say 'good', 'ready', 'looks good', 'all good', 'confirmed', 'yes', 'build it', or similar):\n"+
+    "Ask: What do you want to change, remove, or lock in? Also mention any upcoming fixed commitments like classes or work.\n\n"+
+    "PHASE 2 — WHEN USER CONFIRMS (they say good, ready, looks good, all good, confirmed, yes, build it, or similar):\n"+
     "Incorporate any changes they mentioned including new classes or work schedule.\n"+
     "Then IMMEDIATELY output the BEDROCK tag with NO text after it. Do not ask any more questions.\n"+
     "Output exactly:\n"+
@@ -82,25 +79,14 @@ function buildDayPrompt(profile,observations,log){
   const recentObs=(observations||[]).slice(-3).map(o=>o.date+": energy "+o.energy+"/5, chaos "+o.chaosLevel+"/5").join(" | ")||"none";
   const fixedEvents=(profile.fixedEvents||[]).map(e=>e.day+" "+e.time+" "+e.title).join(", ")||"none";
   const isLate=isLateNight();
-  const targetDate=isLate?"tomorrow":"today";
   const targetDateStr=isLate?new Date(tomorrowStr()).toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"}):dateStr();
-
   return "Accountability coach for "+profile.name+". Time: "+timeStr()+". Building for: "+targetDateStr+".\n\n"+
-    "BEDROCK: "+bedrock+"\n"+
-    "FIXED EVENTS: "+fixedEvents+"\n"+
-    "HABITS: "+habits+"\n"+
-    "STREAK: "+streak+" days\n"+
-    "RECENT HISTORY: "+recent+"\n"+
-    "RECENT ENERGY/CHAOS: "+recentObs+"\n\n"+
-    "RULES:\n"+
-    "- Place each bedrock block at its committed time\n"+
-    "- Account for fixed events — work around them\n"+
-    "- Fill all gaps — no unaccounted time\n"+
+    "BEDROCK: "+bedrock+"\nFIXED EVENTS: "+fixedEvents+"\nHABITS: "+habits+"\nSTREAK: "+streak+"\n"+
+    "RECENT HISTORY: "+recent+"\nRECENT ENERGY/CHAOS: "+recentObs+"\n\n"+
+    "RULES:\n- Place each bedrock block at its committed time\n- Account for fixed events\n- Fill all gaps\n"+
     "- Study blocks: specific subject + topic + active method\n"+
-    "- If recent energy is low: lighter study load, same structure\n"+
-    "- If chaos is high: add buffer blocks after major transitions\n"+
     (isLate?"- Building for TOMORROW: start from wake time, full day\n":"- Building for TODAY: start from NOW ("+timeStr()+"), until sleep\n")+
-    "\nOutput readable schedule first, then:\n"+
+    "Output readable schedule first, then:\n"+
     "<SCHEDULE>[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Block\",\"type\":\"routine|study|meal|movement|free|sleep|buffer\",\"instruction\":\"details or none\"}]</SCHEDULE>";
 }
 
@@ -110,20 +96,13 @@ function buildAuditPrompt(profile,log,schedule,observations){
   const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+", streak "+h.streak+"d").join("\n")||"none";
   const recentObs=(observations||[]).slice(-7);
   const patterns=detectPatterns(log||[],recentObs);
-
   return "Auditing "+profile.name+"'s day. Streak: "+streak+"d.\n\n"+
     "CONTROLLABLE=PUNISHMENT. UNCONTROLLABLE=LEGITIMATE.\n"+
     "Controllable: avoidance, bad choices, tiredness from bad sleep or phone. Uncontrollable: emergencies, family, medical, genuine hard day.\n\n"+
-    "BEDROCK:\n"+bedrock+"\n\n"+
-    "HABITS:\n"+habits+"\n\n"+
-    (patterns.length?"PATTERNS DETECTED:\n"+patterns.map(p=>"- "+p).join("\n")+"\n\n":"")+
-    "1. Ask them to report against each bedrock block\n"+
-    "2. For each miss: get reason, apply controllable test, punish or accept\n"+
-    "3. Ask about each habit\n"+
-    "4. Ask: what time did you wake up, what time are you sleeping? (for observation log)\n"+
-    "5. Energy today 1-5? How chaotic was today 1-5?\n"+
-    "6. State exactly what changes tomorrow\n\n"+
-    "Direct. No softening on controllable misses.\n\n"+
+    "BEDROCK:\n"+bedrock+"\nHABITS:\n"+habits+"\n\n"+
+    (patterns.length?"PATTERNS:\n"+patterns.map(p=>"- "+p).join("\n")+"\n\n":"")+
+    "1. Ask them to report against each bedrock block\n2. For each miss: reason, controllable test, punish or accept\n"+
+    "3. Ask about each habit\n4. Ask wake time, sleep time, energy 1-5, chaos 1-5\n5. State what changes tomorrow\n\n"+
     "<AUDIT>{\"date\":\""+todayStr()+"\",\"completed\":0,\"total\":"+(profile.bedrockBlocks||[]).length+",\"punishments\":0,\"streak\":"+streak+",\"habitUpdates\":[],\"wakeTime\":\"\",\"sleepTime\":\"\",\"energy\":3,\"chaosLevel\":3,\"notes\":\"\"}</AUDIT>";
 }
 
@@ -133,39 +112,36 @@ function buildCoachPrompt(profile,schedule,observations){
   const ctx=(schedule||[]).map((b,i)=>"["+i+"] "+b.time+"-"+b.end+" "+b.title).join(" | ");
   const fixedEvents=(profile.fixedEvents||[]).map(e=>e.day+" "+e.time+" "+e.title).join(", ")||"none";
   const recentObs=(observations||[]).slice(-3).map(o=>o.date+": energy "+o.energy+"/5").join(", ")||"none";
-
   return "Accountability coach for "+(profile.name||"user")+". Streak: "+(profile.streak||0)+"d.\n"+
     "Bedrock: "+bedrock+"\nFixed events: "+fixedEvents+"\nHabits: "+habits+"\nRecent energy: "+recentObs+"\n"+
     "Schedule: "+ctx+"\nTime: "+timeStr()+"\n\n"+
-    "RULES: Max 3 sentences. Direct. Push back on excuses immediately.\n"+
-    "If user reports a conflict or change: readjust the schedule around it. Output full updated schedule.\n"+
-    "If user mentions new fixed event or info about themselves: capture it.\n\n"+
-    "PROFILE_UPDATE:{\"fixedEvents\":[{\"day\":\"\",\"time\":\"\",\"title\":\"\"}],\"notes\":\"\"} — output when you learn something new\n"+
+    "Max 3 sentences. Direct. Push back on excuses immediately.\n"+
+    "If user reports conflict or change: readjust schedule.\n"+
+    "PROFILE_UPDATE:{\"fixedEvents\":[{\"day\":\"\",\"time\":\"\",\"title\":\"\"}],\"notes\":\"\"} when you learn something new\n"+
     "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"}\n"+
-    "REBUILD_NEEDED — if schedule needs full rebuild\n"+
+    "REBUILD_NEEDED if full rebuild needed\n"+
     "HABIT_HIT:<name> or HABIT_MISS:<name>\n"+
-    "EXAM_MODE:{\"name\":\"\",\"daysOut\":7} — if user mentions an exam";
+    "EXAM_MODE:{\"name\":\"\",\"daysOut\":7} if user mentions exam";
 }
 
 function detectPatterns(log,observations){
   const p=[];
   const l3=(log||[]).slice(-3);
-  if(l3.length>=3&&l3.every(l=>l.punishments>0))p.push("Punishments 3 days running — bedrock may need adjusting");
+  if(l3.length>=3&&l3.every(l=>l.punishments>0))p.push("Punishments 3 days running");
   if(l3.length>=3&&l3.every(l=>l.completed<l.total))p.push("Incomplete 3+ days — avoidance pattern");
   const dayMap={};
   (log||[]).forEach(l=>{if(l.completed<l.total){const d=new Date(l.date).toLocaleDateString([],{weekday:"long"});dayMap[d]=(dayMap[d]||0)+1;}});
   Object.entries(dayMap).forEach(([day,count])=>{if(count>=2)p.push(day+" is a recurring problem day");});
   if(observations&&observations.length>=3){
-    const avgEnergy=observations.reduce((s,o)=>s+(o.energy||3),0)/observations.length;
-    if(avgEnergy<2.5)p.push("Consistently low energy — schedule may be too heavy");
-    const avgChaos=observations.reduce((s,o)=>s+(o.chaosLevel||3),0)/observations.length;
-    if(avgChaos>3.5)p.push("High chaos average — more buffer blocks needed");
+    const avgE=observations.reduce((s,o)=>s+(o.energy||3),0)/observations.length;
+    if(avgE<2.5)p.push("Consistently low energy — schedule may be too heavy");
+    const avgC=observations.reduce((s,o)=>s+(o.chaosLevel||3),0)/observations.length;
+    if(avgC>3.5)p.push("High chaos average — more buffers needed");
   }
   return p;
 }
 
-// ── Components ─────────────────────────────────────────
-function Header({appMode,mode,streak,numDays,examMode}){
+function Header({appMode,mode,numDays,streak,examMode}){
   const [now,setNow]=useState(timeStr());
   useEffect(()=>{const t=setInterval(()=>setNow(timeStr()),1000);return()=>clearInterval(t);},[]);
   const modeBg={morning:C.accentFaint,executing:"#0a120a",audit:"#120a10"};
@@ -207,25 +183,23 @@ function ScheduleBlock({block,state}){
 
 function SchedulePanel({blocks,appMode}){
   const ref=useRef(null);
-  const ci=getCurIdx(blocks);
-  useEffect(()=>{if(ref.current&&ci>=0){const els=ref.current.querySelectorAll("[data-idx]");if(els[ci])els[ci].scrollIntoView({block:"center",behavior:"smooth"});}},[ci,blocks.length]);
+  const ci=getCurIdx(blocks||[]);
+  useEffect(()=>{if(ref.current&&ci>=0){const els=ref.current.querySelectorAll("[data-idx]");if(els[ci])els[ci].scrollIntoView({block:"center",behavior:"smooth"});}},[ci,(blocks||[]).length]);
   return(
     <div style={{width:270,flexShrink:0,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",background:C.surface}}>
       <div style={{padding:"9px 12px 6px",borderBottom:"1px solid "+C.borderLight,flexShrink:0}}>
-        <span style={{color:C.textDim,fontSize:9,letterSpacing:2,textTransform:"uppercase"}}>
-          {appMode==="observing"?"Observation Period":"Today's Schedule"}
-        </span>
+        <span style={{color:C.textDim,fontSize:9,letterSpacing:2,textTransform:"uppercase"}}>{appMode==="observing"?"Observation Period":"Today's Schedule"}</span>
       </div>
       <div ref={ref} style={{flex:1,overflowY:"auto",padding:"6px 4px"}}>
         {appMode==="observing"?(
           <div style={{padding:"16px 12px",color:C.textDim,fontSize:11,lineHeight:1.8}}>
             <div style={{color:C.accent,fontSize:12,fontWeight:600,marginBottom:8}}>Coach is watching.</div>
-            <div>No schedule yet. The coach is learning how your days actually work before building anything.</div>
+            <div>No schedule yet. Learning how your days actually work before building anything.</div>
             <div style={{marginTop:12,color:C.textDim}}>Check in daily. After 7 days the coach will propose your bedrock.</div>
           </div>
-        ):!blocks.length?(
+        ):!(blocks||[]).length?(
           <div style={{padding:"20px 12px",color:C.textFaint,fontSize:11,textAlign:"center",lineHeight:1.8}}>Building…</div>
-        ):blocks.map((b,i)=>(
+        ):(blocks||[]).map((b,i)=>(
           <div key={i} data-idx={i}><ScheduleBlock block={b} state={i===ci?"current":i<ci?"past":"future"}/></div>
         ))}
       </div>
@@ -268,76 +242,33 @@ function InputBar({value,onChange,onSend,disabled,placeholder}){
   );
 }
 
-// ── Check-in widget ────────────────────────────────────
 function CheckIn({onSubmit,type}){
   const [wakeTime,setWakeTime]=useState("");
   const [sleepTime,setSleepTime]=useState("");
   const [energy,setEnergy]=useState(3);
   const [chaos,setChaos]=useState(3);
-  const [onTrack,setOnTrack]=useState(true);
+  const [onTrack,setOnTrack]=useState("Yes, on track");
   const [notes,setNotes]=useState("");
-  const energyLabels=["","Very low","Low","Okay","Good","Sharp"];
-  const chaosLabels=["","Very stable","Mostly stable","Some disruption","Chaotic","Total chaos"];
-
+  const eLabels=["","Very low","Low","Okay","Good","Sharp"];
+  const cLabels=["","Very stable","Mostly stable","Some disruption","Chaotic","Total chaos"];
   return(
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"16px",margin:"8px 0",display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{color:C.accent,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>
-        {type==="morning"?"Morning Check-in":type==="afternoon"?"Afternoon Check-in":"Evening Report"}
-      </div>
-      {type==="morning"&&(
-        <div>
-          <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time did you wake up?</div>
-          <input value={wakeTime} onChange={e=>setWakeTime(e.target.value)} placeholder="e.g. 08:30"
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-      )}
-      {type==="evening"&&(
-        <div>
-          <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time are you sleeping?</div>
-          <input value={sleepTime} onChange={e=>setSleepTime(e.target.value)} placeholder="e.g. 23:30"
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-      )}
-      {type==="afternoon"&&(
-        <div>
-          <div style={{color:C.textDim,fontSize:11,marginBottom:8}}>Are you on track with your schedule?</div>
-          <div style={{display:"flex",gap:8}}>
-            {["Yes, on track","Slightly behind","Off track"].map(opt=>(
-              <button key={opt} onClick={()=>setOnTrack(opt)} style={{flex:1,padding:"7px 4px",background:onTrack===opt?C.accent:"#1a1814",border:"1px solid "+(onTrack===opt?C.accent:C.border),borderRadius:5,cursor:"pointer",color:onTrack===opt?"#000":C.textDim,fontSize:11}}>{opt}</button>
-            ))}
-          </div>
-        </div>
-      )}
-      {[["Energy",energy,setEnergy,energyLabels],["Day chaos",chaos,setChaos,chaosLabels]].map(([label,val,set,labels])=>(
+      <div style={{color:C.accent,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>{type==="morning"?"Morning Check-in":type==="afternoon"?"Afternoon Check-in":"Evening Report"}</div>
+      {type==="morning"&&<div><div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time did you wake up?</div><input value={wakeTime} onChange={e=>setWakeTime(e.target.value)} placeholder="e.g. 08:30" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>}
+      {type==="evening"&&<div><div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time are you sleeping?</div><input value={sleepTime} onChange={e=>setSleepTime(e.target.value)} placeholder="e.g. 23:30" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>}
+      {type==="afternoon"&&<div><div style={{color:C.textDim,fontSize:11,marginBottom:8}}>Are you on track?</div><div style={{display:"flex",gap:8}}>{["Yes, on track","Slightly behind","Off track"].map(opt=><button key={opt} onClick={()=>setOnTrack(opt)} style={{flex:1,padding:"7px 4px",background:onTrack===opt?C.accent:"#1a1814",border:"1px solid "+(onTrack===opt?C.accent:C.border),borderRadius:5,cursor:"pointer",color:onTrack===opt?"#000":C.textDim,fontSize:11}}>{opt}</button>)}</div></div>}
+      {[["Energy",energy,setEnergy,eLabels],["Day chaos",chaos,setChaos,cLabels]].map(([label,val,set,labels])=>(
         <div key={label}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-            <span style={{color:C.textDim,fontSize:11}}>{label}</span>
-            <span style={{color:C.textMid,fontSize:11}}>{labels[val]}</span>
-          </div>
-          <div style={{display:"flex",gap:5}}>
-            {[1,2,3,4,5].map(n=>(
-              <button key={n} onClick={()=>set(n)} style={{flex:1,padding:"7px 0",background:val>=n?C.accent:"#1a1814",border:"1px solid "+(val>=n?C.accent:C.border),borderRadius:4,cursor:"pointer",color:val>=n?"#000":C.textDim,fontSize:12,fontWeight:600}}>{n}</button>
-            ))}
-          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{color:C.textDim,fontSize:11}}>{label}</span><span style={{color:C.textMid,fontSize:11}}>{labels[val]}</span></div>
+          <div style={{display:"flex",gap:5}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>set(n)} style={{flex:1,padding:"7px 0",background:val>=n?C.accent:"#1a1814",border:"1px solid "+(val>=n?C.accent:C.border),borderRadius:4,cursor:"pointer",color:val>=n?"#000":C.textDim,fontSize:12,fontWeight:600}}>{n}</button>)}</div>
         </div>
       ))}
-      <div>
-        <div style={{color:C.textDim,fontSize:11,marginBottom:6}}>
-          {type==="afternoon"?"Anything that came up or changed?":"Anything notable? (optional)"}
-        </div>
-        <input value={notes} onChange={e=>setNotes(e.target.value)}
-          placeholder={type==="afternoon"?"e.g. class ran long, unexpected errand, low energy…":"e.g. classes, events, how you felt…"}
-          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/>
-      </div>
-      <button onClick={()=>onSubmit({wakeTime,sleepTime,energy,chaosLevel:chaos,onTrack,notes,date:todayStr(),type})}
-        style={{background:C.accent,color:"#000",border:"none",borderRadius:6,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-        Submit
-      </button>
+      <div><div style={{color:C.textDim,fontSize:11,marginBottom:6}}>{type==="afternoon"?"Anything that came up?":"Anything notable? (optional)"}</div><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder={type==="afternoon"?"e.g. class ran long, unexpected errand…":"e.g. classes, events, how you felt…"} style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>
+      <button onClick={()=>onSubmit({wakeTime,sleepTime,energy,chaosLevel:chaos,onTrack,notes,date:todayStr(),type})} style={{background:C.accent,color:"#000",border:"none",borderRadius:6,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Submit</button>
     </div>
   );
 }
 
-// ── Setup ──────────────────────────────────────────────
 function Setup({onComplete}){
   const [name,setName]=useState("");
   const [subjects,setSubjects]=useState("");
@@ -345,39 +276,27 @@ function Setup({onComplete}){
   return(
     <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui,sans-serif"}}>
       <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"32px 28px",width:"100%",maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
-        <div>
-          <div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Coach</div>
-          <div style={{color:C.text,fontSize:18,fontWeight:700}}>Let's get started.</div>
-          <div style={{color:C.textMid,fontSize:12,marginTop:6,lineHeight:1.7}}>The coach will observe you for 7 days before building your schedule. Just check in daily — it does the rest.</div>
-        </div>
-        <div>
-          <label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Your name</label>
-          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name" autoFocus
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-        <div>
-          <label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Subjects / areas of work</label>
-          <input value={subjects} onChange={e=>setSubjects(e.target.value)} placeholder="e.g. Calculus, Linear Algebra, Stats"
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-        <div>
-          <label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Anything the coach should know upfront</label>
-          <input value={context} onChange={e=>setContext(e.target.value)} placeholder="e.g. work Tues/Thurs, bad sleep habits, phone addiction"
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/>
-        </div>
-        <button onClick={()=>{
-          if(!name.trim())return;
-          onComplete({name:name.trim(),subjects:subjects.split(",").map(s=>s.trim()).filter(Boolean),context,appMode:"observing",streak:0,habits:[],fixedEvents:[],bedrockBlocks:null,examMode:null,setupDate:todayStr()});
-        }} style={{background:C.accent,color:"#000",border:"none",borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",marginTop:4}}>
-          Begin →
-        </button>
+        <div><div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Coach</div><div style={{color:C.text,fontSize:18,fontWeight:700}}>Let's get started.</div><div style={{color:C.textMid,fontSize:12,marginTop:6,lineHeight:1.7}}>The coach will observe you for 7 days before building your schedule. Check in daily — it does the rest.</div></div>
+        <div><label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Your name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Name" autoFocus style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>
+        <div><label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Subjects / areas of work</label><input value={subjects} onChange={e=>setSubjects(e.target.value)} placeholder="e.g. Calculus, Linear Algebra, Stats" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>
+        <div><label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Anything the coach should know upfront</label><input value={context} onChange={e=>setContext(e.target.value)} placeholder="e.g. work Tues/Thurs, bad sleep habits, phone addiction" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>
+        <button onClick={()=>{if(!name.trim())return;onComplete({name:name.trim(),subjects:subjects.split(",").map(s=>s.trim()).filter(Boolean),context,appMode:"observing",streak:0,habits:[],fixedEvents:[],bedrockBlocks:null,examMode:null,setupDate:todayStr()});}} style={{background:C.accent,color:"#000",border:"none",borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",marginTop:4}}>Begin →</button>
       </div>
     </div>
   );
 }
 
-// ── Observation screen ─────────────────────────────────
 function ObservationScreen({profile,observations,onUpdate}){
+  const numDays=(observations||[]).length;
+  const ready=numDays>=7;
+  const hr=new Date().getHours();
+  const isAft=hr>=12&&hr<20;
+  const isEve=hr>=20;
+  const todayObs=(observations||[]).find(o=>o.date===todayStr());
+  const hasMorning=!!(todayObs&&todayObs.wakeTime);
+  const hasAft=!!(todayObs&&todayObs.afternoonDone);
+  const hasEve=!!(todayObs&&todayObs.sleepTime);
+
   const [messages,setMessages]=useState([]);
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
@@ -386,57 +305,27 @@ function ObservationScreen({profile,observations,onUpdate}){
   const [analyzing,setAnalyzing]=useState(false);
   const feedRef=useRef(null);
   const conv=useRef([]);
-  const todayObs=observations.find(o=>o.date===todayStr());
-  const hasMorning=todayObs&&todayObs.wakeTime;
-  const hasAfternoon=todayObs&&todayObs.afternoonDone;
-  const hasEvening=todayObs&&todayObs.sleepTime;
-  const obsHour=new Date().getHours();
-  const isAfternoonTime=obsHour>=12&&obsHour<20;
-  const isEveningTime=obsHour>=20;
-  const readyToAnalyze=daysObserved>=7;
 
+  useEffect(()=>{if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;},[messages,loading]);
   useEffect(()=>{
-    if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;
-  },[messages,loading]);
-
-  useEffect(()=>{
-    const n=daysObserved;
-    const greeting=readyToAnalyze
-      ?"I've been watching for "+n+" days. I have enough data to build your schedule. Ready when you are — just say the word."
-      :"Day "+n+" of observation. "+(hasMorning&&!hasEvening?"Morning logged. Check in tonight before you sleep.":!hasMorning?"Check in below — won't take 30 seconds.":"Both check-ins done for today. See you tomorrow.");
+    const greeting=ready
+      ?"I've been watching for "+numDays+" days. I have enough data to build your schedule. Ready when you are."
+      :"Day "+numDays+" of observation. "+(hasMorning&&!hasEve?"Morning logged. Check in tonight.":!hasMorning?"Check in below — 30 seconds.":"All check-ins done. See you tomorrow.");
     setMessages([{role:"ai",text:greeting}]);
   },[]);
 
   async function handleCheckin(data){
     setShowCheckin(false);
-    const existing=observations.find(o=>o.date===todayStr())||{date:todayStr()};
+    const existing=(observations||[]).find(o=>o.date===todayStr())||{date:todayStr()};
     const merged={...existing,...data};
     if(data.type==="afternoon")merged.afternoonDone=true;
-    const newObs=[...observations.filter(o=>o.date!==todayStr()),merged];
+    const newObs=[...(observations||[]).filter(o=>o.date!==todayStr()),merged];
     await sSet(SK.observations,newObs);
     onUpdate({observations:newObs});
-    const msg=data.type==="morning"?"Morning logged. Energy "+data.energy+"/5. Chaos "+data.chaosLevel+"/5. See you tonight."
+    const msg=data.type==="morning"?"Morning logged. Energy "+data.energy+"/5. See you this afternoon."
       :data.type==="afternoon"?"Afternoon logged. Energy "+data.energy+"/5."
-      :"Evening logged. Rest well. Check in tomorrow morning.";
+      :"Evening logged. Rest well.";
     setMessages(m=>[...m,{role:"ai",text:msg}]);
-  }
-
-  async function runAnalysis(){
-    setAnalyzing(true);
-    setMessages(m=>[...m,{role:"ai",text:"Analysing "+daysObserved+" days of data…"}]);
-    try{
-      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations),messages:[{role:"user",content:"Analyse my data and propose my bedrock schedule."}]})});
-      const d=await r.json();
-      const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
-      conv.current=[{role:"user",content:"Analyse my data and propose my bedrock schedule."},{role:"assistant",content:raw}];
-      const bedrockMatch=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
-      if(bedrockMatch){
-        await applyBedrock(bedrockMatch[1]);return;
-      }
-      const clean=raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim();
-      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+daysObserved+" days of data…"),{role:"ai",text:clean}]);
-    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Analysis failed. Try again."}]);}
-    setAnalyzing(false);
   }
 
   async function applyBedrock(json){
@@ -444,12 +333,27 @@ function ObservationScreen({profile,observations,onUpdate}){
       const b=JSON.parse(json.trim());
       const updated={...profile,...b,appMode:"active",activeSince:todayStr()};
       await sSet(SK.profile,updated);
-      onUpdate({profile:updated,observations,appMode:"active"});
+      onUpdate({profile:updated,observations:observations||[],appMode:"active"});
     }catch(e){
-      console.error("bedrock parse error",e);
-      setMessages(m=>[...m,{role:"ai",text:"Failed to save bedrock. Try clicking Build my schedule again."}]);
+      console.error("bedrock parse",e);
+      setMessages(m=>[...m,{role:"ai",text:"Failed to save. Try again."}]);
       setAnalyzing(false);
     }
+  }
+
+  async function runAnalysis(){
+    setAnalyzing(true);
+    setMessages(m=>[...m,{role:"ai",text:"Analysing "+numDays+" days of data…"}]);
+    try{
+      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations||[]),messages:[{role:"user",content:"Analyse my data and propose my bedrock schedule."}]})});
+      const d=await r.json();
+      const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
+      conv.current=[{role:"user",content:"Analyse my data and propose my bedrock schedule."},{role:"assistant",content:raw}];
+      const bm=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
+      if(bm){await applyBedrock(bm[1]);return;}
+      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+numDays+" days of data…"),{role:"ai",text:raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim()}]);
+    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Analysis failed. Try again."}]);}
+    setAnalyzing(false);
   }
 
   async function send(){
@@ -460,29 +364,28 @@ function ObservationScreen({profile,observations,onUpdate}){
     if(msg.toLowerCase().match(/ready|build|go ahead|looks good|all good|seems good|confirmed|yes|good/)){
       setAnalyzing(true);
       try{
-        const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations),messages:conv.current})});
+        const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations||[]),messages:conv.current})});
         const d=await r.json();
         const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
         conv.current=[...conv.current,{role:"assistant",content:raw}];
-        const bedrockMatch=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
-        if(bedrockMatch){await applyBedrock(bedrockMatch[1]);return;}
-        const clean=raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim();
-        setMessages(m=>[...m,{role:"ai",text:clean||"Bedrock confirmed. Saving…"}]);
+        const bm=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
+        if(bm){await applyBedrock(bm[1]);return;}
+        setMessages(m=>[...m,{role:"ai",text:raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim()}]);
       }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
       setAnalyzing(false);return;
     }
     setLoading(true);
     try{
-      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"You are an accountability coach in observation mode for "+profile.name+". Days observed: "+daysObserved+"/7. Be brief. If they confirm the schedule say you are saving it now.",message:msg})});
+      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"Accountability coach in observation mode for "+profile.name+". Days observed: "+numDays+"/7. Brief responses only.",message:msg})});
       const d=await r.json();
       setMessages(m=>[...m,{role:"ai",text:d.content||"Talk to me."}]);
-    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
+    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error."}]);}
     setLoading(false);
   }
 
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="observing" mode={getMode()} streak={0} numDaysObserved={daysObserved} examMode={null}/>
+      <Header appMode="observing" mode={getMode()} numDays={numDays} streak={0} examMode={null}/>
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
         <SchedulePanel blocks={[]} appMode="observing"/>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
@@ -491,10 +394,11 @@ function ObservationScreen({profile,observations,onUpdate}){
             {(loading||analyzing)&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
             {showCheckin&&<CheckIn onSubmit={handleCheckin} type={checkinType}/>}
             {!showCheckin&&(
-              <div style={{display:"flex",gap:8,marginTop:4}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {!hasMorning&&<button onClick={()=>{setCheckinType("morning");setShowCheckin(true);}} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
-                {hasMorning&&!hasEvening&&new Date().getHours()>=20&&<button onClick={()=>{setCheckinType("evening");setShowCheckin(true);}} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
-                {readyToAnalyze&&!analyzing&&<button onClick={runAnalysis} style={{background:C.accent,border:"none",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#000",fontWeight:700,cursor:"pointer"}}>Build my schedule →</button>}
+                {hasMorning&&!hasAft&&isAft&&<button onClick={()=>{setCheckinType("afternoon");setShowCheckin(true);}} style={{background:"#0a0e14",border:"1px solid #1a2a3a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8aaa",cursor:"pointer"}}>Afternoon check-in</button>}
+                {hasMorning&&!hasEve&&isEve&&<button onClick={()=>{setCheckinType("evening");setShowCheckin(true);}} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
+                {ready&&!analyzing&&<button onClick={runAnalysis} style={{background:C.accent,border:"none",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#000",fontWeight:700,cursor:"pointer"}}>Build my schedule →</button>}
               </div>
             )}
           </div>
@@ -505,7 +409,6 @@ function ObservationScreen({profile,observations,onUpdate}){
   );
 }
 
-// ── Active screen ──────────────────────────────────────
 function ActiveScreen({profile:initProfile,observations:initObs}){
   const [profile,setProfile]=useState(initProfile);
   const [observations,setObservations]=useState(initObs||[]);
@@ -526,7 +429,6 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
   useEffect(()=>{
     Promise.all([sGet(SK.schedule),sGet(SK.log)]).then(([s,l])=>{
       if(l)setLog(l);
-      const alreadyAudited=l&&l.find(e=>e.date===todayStr());
       const targetDate=isLateNight()?tomorrowStr():todayStr();
       const hasSchedule=s&&s.date===targetDate&&s.blocks&&s.blocks.length;
       if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Schedule loaded. "+timeStr()+" — "+getCurrentBlockMsg(s.blocks)}]);}
@@ -536,7 +438,7 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
 
   function getCurrentBlockMsg(blocks){
     const ci=getCurIdx(blocks);
-    if(ci<0)return "Nothing scheduled yet today.";
+    if(ci<0)return "Nothing scheduled yet.";
     const cur=blocks[ci];const next=blocks[ci+1];
     return "You should be: "+cur.title+(next?". Up next: "+next.title:".");
   }
@@ -581,20 +483,18 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
     setShowCheckin(false);
     const existing=observations.find(o=>o.date===todayStr())||{date:todayStr()};
     const merged={...existing,...data};
-    if(data.type==="afternoon")merged.afternoonDone=true;
+    if(data.type==="afternoon"){
+      merged.afternoonDone=true;
+      if(data.onTrack!=="Yes, on track"){
+        setTimeout(()=>autoBuild(log),300);
+      }
+    }
     const newObs=[...observations.filter(o=>o.date!==todayStr()),merged];
     setObservations(newObs);
     await sSet(SK.observations,newObs);
-    let msg="";
-    if(data.type==="morning")msg="Morning logged. Energy "+data.energy+"/5.";
-    else if(data.type==="afternoon"){
-      msg="Afternoon logged. Energy "+data.energy+"/5.";
-      if(data.onTrack!=="Yes, on track"){
-        msg+=" You're "+data.onTrack.toLowerCase()+". Readjusting your schedule…";
-        setTimeout(()=>autoBuild(log),500);
-      }
-    }
-    else msg="Evening logged. Rest well.";
+    const msg=data.type==="morning"?"Morning logged. Energy "+data.energy+"/5."
+      :data.type==="afternoon"?"Afternoon logged."+(data.onTrack!=="Yes, on track"?" Readjusting your schedule…":"")
+      :"Evening logged. Rest well.";
     setMessages(m=>[...m,{role:"ai",text:msg}]);
   }
 
@@ -614,9 +514,8 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
             const entry=JSON.parse(am[1].trim());
             const nl=[...log,entry];setLog(nl);await sSet(SK.log,nl);
             const allGood=entry.completed>=entry.total&&entry.punishments===0;
-            const ns=allGood?(profile.streak||0)+1:0;
-            const np={...profile,streak:ns};
-            if(entry.wakeTime||entry.sleepTime||entry.energy){
+            const np={...profile,streak:allGood?(profile.streak||0)+1:0};
+            if(entry.wakeTime||entry.sleepTime){
               const newObs=[...observations.filter(o=>o.date!==todayStr()),{date:todayStr(),wakeTime:entry.wakeTime||"",sleepTime:entry.sleepTime||"",energy:entry.energy||3,chaosLevel:entry.chaosLevel||3,notes:entry.notes||""}];
               setObservations(newObs);await sSet(SK.observations,newObs);
             }
@@ -637,14 +536,14 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
         const d=await r.json();
         const raw=d.content||"";
         const np={...profile};let changed=false;
-        const pu=raw.match(/PROFILE_UPDATE:(\{[\s\S]*?\}(?=\s|$))/);
-        if(pu){try{const u=JSON.parse(pu[1]);if(u.fixedEvents){np.fixedEvents=[...(np.fixedEvents||[]),...u.fixedEvents];}if(u.notes)np.notes=(np.notes||"")+". "+u.notes;changed=true;}catch(e){console.error(e);}}
+        const pu=raw.match(/PROFILE_UPDATE:(\{[^}]*\})/);
+        if(pu){try{const u=JSON.parse(pu[1]);if(u.fixedEvents)np.fixedEvents=[...(np.fixedEvents||[]),...u.fixedEvents];if(u.notes)np.notes=(np.notes||"")+". "+u.notes;changed=true;}catch(e){console.error(e);}}
         const em=raw.match(/EXAM_MODE:(\{[^}]+\})/);
         if(em){try{np.examMode=JSON.parse(em[1]);changed=true;}catch(e){console.error(e);}}
         const hh=raw.match(/HABIT_HIT:(\S+)/),hm=raw.match(/HABIT_MISS:(\S+)/);
         if(hh||hm){np.habits=(np.habits||[]).map(h=>{if(hh&&h.name.toLowerCase().includes(hh[1].toLowerCase())){const s=(h.streak||0)+1;return {...h,streak:s};}if(hm&&h.name.toLowerCase().includes(hm[1].toLowerCase()))return {...h,streak:0,target:h.baseline};return h;});changed=true;}
         if(changed)await saveProfile(np);
-        if(raw.includes("REBUILD_NEEDED")){conv.current=[];await sSet(SK.schedule,{date:isLateNight()?tomorrowStr():todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:isLateNight()?"Rebuilding tomorrow…":"Rebuilding…"}]);setLoading(false);await autoBuild(log);return;}
+        if(raw.includes("REBUILD_NEEDED")){conv.current=[];await sSet(SK.schedule,{date:isLateNight()?tomorrowStr():todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Rebuilding…"}]);setLoading(false);await autoBuild(log);return;}
         const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
         if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:isLateNight()?tomorrowStr():todayStr(),blocks:nb});}catch(e){console.error(e);}}
         const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/PROFILE_UPDATE:[^\n]*/g,"").replace(/EXAM_MODE:[^\n]*/g,"").replace(/HABIT_HIT:\S+|HABIT_MISS:\S+|REBUILD_NEEDED/g,"").trim();
@@ -655,15 +554,15 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
   }
 
   const todayObs=observations.find(o=>o.date===todayStr());
-  const hasMorning=todayObs&&todayObs.wakeTime;
-  const hasAfternoon=todayObs&&todayObs.afternoonDone;
-  const hasEvening=todayObs&&todayObs.sleepTime;
-  const isAfternoon=()=>{const h=new Date().getHours();return h>=12&&h<18;};
+  const hasMorningA=!!(todayObs&&todayObs.wakeTime);
+  const hasAftA=!!(todayObs&&todayObs.afternoonDone);
+  const hasEveA=!!(todayObs&&todayObs.sleepTime);
+  const aHr=new Date().getHours();
   const ph=mode==="audit"?"Report in…":"Talk to your coach…";
 
   return(
     <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="active" mode={mode} streak={profile.streak||0} numDaysObserved={0} examMode={profile.examMode||null}/>
+      <Header appMode="active" mode={mode} numDays={0} streak={profile.streak||0} examMode={profile.examMode||null}/>
       <div style={{flex:1,display:"flex",overflow:"hidden"}}>
         <SchedulePanel blocks={schedule} appMode="active"/>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
@@ -671,12 +570,12 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
             {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your coach is ready.</div>}
             {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
             {loading&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
-            {showCheckin&&<CheckIn onSubmit={handleCheckin} type={showCheckin}/>}
+            {showCheckin&&<CheckIn onSubmit={handleCheckin} type={aHr<12?"morning":aHr<20?"afternoon":"evening"}/>}
             {!showCheckin&&(
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {!hasMorning&&mode==="morning"&&<button onClick={()=>setShowCheckin("morning")} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
-                {hasMorning&&!hasAfternoon&&isAfternoon()&&<button onClick={()=>setShowCheckin("afternoon")} style={{background:"#0a0e14",border:"1px solid #1a2a3a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8aaa",cursor:"pointer"}}>Afternoon check-in</button>}
-                {hasMorning&&!hasEvening&&mode==="audit"&&<button onClick={()=>setShowCheckin("evening")} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
+                {!hasMorningA&&aHr<12&&<button onClick={()=>setShowCheckin(true)} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
+                {hasMorningA&&!hasAftA&&aHr>=12&&aHr<20&&<button onClick={()=>setShowCheckin(true)} style={{background:"#0a0e14",border:"1px solid #1a2a3a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8aaa",cursor:"pointer"}}>Afternoon check-in</button>}
+                {hasMorningA&&!hasEveA&&aHr>=20&&<button onClick={()=>setShowCheckin(true)} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
               </div>
             )}
           </div>
@@ -687,31 +586,17 @@ function ActiveScreen({profile:initProfile,observations:initObs}){
   );
 }
 
-// ── Root ───────────────────────────────────────────────
 export default function App(){
   const [state,setState]=useState(null);
-
   useEffect(()=>{
     Promise.all([sGet(SK.profile),sGet(SK.observations)]).then(([p,o])=>{
       if(!p)setState({appMode:"setup"});
       else setState({profile:p,observations:o||[],appMode:p.appMode||"observing"});
     });
   },[]);
-
-  async function handleSetup(p){
-    await sSet(SK.profile,p);
-    setState({profile:p,observations:[],appMode:"observing"});
-  }
-
-  function handleObsUpdate({observations,profile,appMode}){
-    setState(s=>({...s,observations:observations||s.observations,profile:profile||s.profile,appMode:appMode||s.appMode}));
-  }
-
-  if(state===null)return(
-    <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>Loading…</div>
-    </div>
-  );
+  async function handleSetup(p){await sSet(SK.profile,p);setState({profile:p,observations:[],appMode:"observing"});}
+  function handleObsUpdate({observations,profile,appMode}){setState(s=>({...s,observations:observations||s.observations,profile:profile||s.profile,appMode:appMode||s.appMode}));}
+  if(state===null)return <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>Loading…</div></div>;
   if(state.appMode==="setup")return <Setup onComplete={handleSetup}/>;
   if(state.appMode==="observing")return <ObservationScreen profile={state.profile} observations={state.observations} onUpdate={handleObsUpdate}/>;
   return <ActiveScreen profile={state.profile} observations={state.observations}/>;
