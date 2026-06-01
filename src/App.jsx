@@ -165,20 +165,19 @@ function detectPatterns(log,observations){
 }
 
 // ── Components ─────────────────────────────────────────
-function Header({appMode,mode,streak,numDaysObserved,examMode}){
+function Header({appMode,mode,streak,numDays,examMode}){
   const [now,setNow]=useState(timeStr());
   useEffect(()=>{const t=setInterval(()=>setNow(timeStr()),1000);return()=>clearInterval(t);},[]);
-  const modeLabel={morning:"Morning",executing:"Executing",audit:"Audit"};
   const modeBg={morning:C.accentFaint,executing:"#0a120a",audit:"#120a10"};
   return(
-    <div style={{background:appMode==="observing"?"#0a0e14":modeBg[mode],borderBottom:"1px solid "+C.border,padding:"13px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+    <div style={{background:appMode==="observing"?"#0a0e14":modeBg[mode]||C.accentFaint,borderBottom:"1px solid "+C.border,padding:"13px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <div>
           <div style={{color:C.accent,fontSize:11,fontWeight:600,letterSpacing:1,textTransform:"uppercase"}}>{appMode==="observing"?"Observing":"Coach"}</div>
           <div style={{color:C.textDim,fontSize:11,marginTop:2}}>{dateStr()}</div>
         </div>
         <div style={{display:"flex",gap:6}}>
-          {appMode==="observing"&&<div style={{background:C.obs,border:"1px solid "+C.obsBorder,borderRadius:3,padding:"2px 7px",fontSize:9,color:"#4a8aaa",letterSpacing:1}}>{"DAY "+(numDaysObserved||0)+" OF 7"}</div>}
+          {appMode==="observing"&&<div style={{background:C.obs,border:"1px solid "+C.obsBorder,borderRadius:3,padding:"2px 7px",fontSize:9,color:"#4a8aaa",letterSpacing:1}}>{"DAY "+(numDays||0)+" OF 7"}</div>}
           {appMode==="active"&&streak>0&&<div style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:3,padding:"2px 7px",fontSize:9,color:C.accent}}>{"🔥"+streak}</div>}
           {examMode&&<div style={{background:"#2a1000",border:"1px solid #5a2a00",borderRadius:3,padding:"2px 7px",fontSize:9,color:"#c86420",letterSpacing:1}}>{"EXAM "+examMode.daysOut+"d"}</div>}
         </div>
