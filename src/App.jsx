@@ -137,7 +137,7 @@ async function callAxiom(messages, jsonMode = false, maxTokens = 1024) {
     ? SYSTEM_PROMPT + '\n\nCRITICAL INSTRUCTION: Respond ONLY with a valid JSON object. No markdown fences. No preamble. No trailing text. Pure raw JSON starting with { and ending with }.'
     : SYSTEM_PROMPT;
 
-  const res = await fetch('/api/axiom', {
+  const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, system, maxTokens }),
