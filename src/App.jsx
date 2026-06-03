@@ -1,603 +1,800 @@
-import { useState, useEffect, useRef } from "react";
+'use client';
 
-const CLAUDE_API="/api/generate";
-const GROQ_API="/api/groq";
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-function todayStr(){return new Date().toDateString();}
-function timeStr(){return new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});}
-function dateStr(){return new Date().toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"});}
-function toMins(t){const [h,m]=t.split(":").map(Number);return h*60+m;}
-function nowMins(){const n=new Date();return n.getHours()*60+n.getMinutes();}
-function isLateNight(){return new Date().getHours()>=22;}
-function getMode(){const h=new Date().getHours();return h<12?"morning":h<21?"executing":"audit";}
-function getCurIdx(blocks){const now=nowMins();let idx=-1;for(let i=0;i<blocks.length;i++){if(toMins(blocks[i].time)<=now)idx=i;else break;}return idx;}
-function tomorrowStr(){const d=new Date();d.setDate(d.getDate()+1);return d.toDateString();}
-function dayName(ds){return new Date(ds).toLocaleDateString([],{weekday:"long"});}
-
-const SK={profile:"cv6_profile",observations:"cv6_obs",schedule:"cv6_schedule",log:"cv6_log"};
-const mem={};
-async function sGet(key){
-  try{
-    if(mem[key]!==undefined)return mem[key];
-    const r=await fetch("/api/memory?key="+encodeURIComponent(key));
-    const d=await r.json();
-    const val=d.value?JSON.parse(d.value):null;
-    mem[key]=val;return val;
-  }catch(e){console.error("sGet",e);return null;}
-}
-async function sSet(key,val){
-  mem[key]=val;
-  try{await fetch("/api/memory",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,value:JSON.stringify(val)})});}
-  catch(e){console.error("sSet",e);}
-}
-
-const C={
-  bg:"#0f0e0c",surface:"#161410",border:"#2a2520",borderLight:"#1e1c18",
-  accent:"#c8922a",accentDim:"#7a5518",accentFaint:"#2a1f0a",
-  text:"#e8e0d0",textMid:"#8a7e6a",textDim:"#4a4238",textFaint:"#2a2520",
-  study:"#1a1800",studyBorder:"#3a3200",
-  routine:"#0e1410",routineBorder:"#1a2a1a",
-  meal:"#0e0e1a",mealBorder:"#1a1a3a",
-  movement:"#0a1410",movementBorder:"#153020",
-  free:"#140e18",freeBorder:"#2a1a30",
-  sleep:"#100e18",sleepBorder:"#20183a",
-  buffer:"#141210",bufferBorder:"#2a2418",
-  obs:"#0a0e14",obsBorder:"#1a2a3a",
+// ═══════════════════════════════════════════════════════════════
+// USER PROFILE — Pre-filled from intake questionnaire
+// To update: edit the fields below and redeploy.
+// ═══════════════════════════════════════════════════════════════
+const PROFILE = {
+  situation: 'Working + studying — shift work with irregular hours',
+  studyLoad: '3-4 subjects, moderate',
+  sleep: '6-7 hours, inconsistent',
+  badHabits: [
+    'Staying up too late / sleeping in late',
+    'YouTube & Netflix procrastination',
+    'Phone & social media in bed',
+    'Digital lust (compulsive pornography use)',
+  ],
+  studyHistory: 'Rarely studies — no established habit. Starting tasks is the primary barrier.',
+  goals: [
+    'Study/academic performance (primary)',
+    'Fitness & health',
+    'Breaking bad habits',
+    'Sleep & energy management',
+  ],
+  struggles: [
+    'Activation energy — cannot start tasks',
+    'Motivation collapses after initial burst',
+    'Doom-scrolling & phone compulsion',
+    'Shift work fatigue and circadian disruption',
+    'Unpredictable schedule making consistency hard',
+  ],
 };
 
-function buildAnalysisPrompt(profile,observations){
-  const obsStr=observations.map(o=>
-    "Date: "+o.date+" ("+dayName(o.date)+")\n"+
-    "  Wake: "+(o.wakeTime||"unknown")+" | Sleep: "+(o.sleepTime||"unknown")+" | Energy: "+(o.energy||"?")+"/5\n"+
-    "  Chaos: "+(o.chaosLevel||"?")+"/5 | Notes: "+(o.notes||"none")
-  ).join("\n\n");
-  return "You are analysing "+profile.name+"'s behaviour data to build their personalised bedrock schedule.\n\n"+
-    "OBSERVATIONS ("+observations.length+" days):\n"+obsStr+"\n\n"+
-    "SUBJECTS: "+(profile.subjects||[]).join(", ")+"\n"+
-    "CONTEXT: "+(profile.context||"none")+"\n\n"+
-    "PHASE 1 — ANALYSE AND PROPOSE:\n"+
-    "Present what you observed (wake times, sleep, energy patterns, chaos level, which days are harder).\n"+
-    "Then propose a realistic bedrock schedule as a clear numbered list: TIME — BLOCK — DURATION.\n"+
-    "Be conservative — base it on observed behaviour, not ideal behaviour.\n"+
-    "Include: wake, morning routine, study blocks, meals, movement, free time, sleep.\n"+
-    "Ask: What do you want to change, remove, or lock in? Also mention any upcoming fixed commitments like classes or work.\n\n"+
-    "PHASE 2 — WHEN USER CONFIRMS (they say good, ready, looks good, all good, confirmed, yes, build it, or similar):\n"+
-    "Incorporate any changes they mentioned including new classes or work schedule.\n"+
-    "Then IMMEDIATELY output the BEDROCK tag with NO text after it. Do not ask any more questions.\n"+
-    "Output exactly:\n"+
-    "<BEDROCK>\n"+
-    "{\"wakeTime\":\"HH:MM\",\"sleepTime\":\"HH:MM\",\"peakEnergy\":\"afternoon\",\"chaosLevel\":3,\"focusMins\":25,\"fixedEvents\":[{\"day\":\"monday\",\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Class\"}],\"bedrockBlocks\":[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Block name\",\"type\":\"routine|study|meal|movement|free|sleep\"}]}\n"+
-    "</BEDROCK>\n\n"+
-    "CRITICAL: If the user has confirmed even once, output the BEDROCK tag immediately. Do not loop. Do not ask again.";
-}
+// ═══════════════════════════════════════════════════════════════
+// AXIOM SYSTEM PROMPT — All of AXIOM's expertise lives here
+// ═══════════════════════════════════════════════════════════════
+const SYSTEM_PROMPT = `You are AXIOM — the world's most elite schedule and performance coach. Military precision meets cutting-edge neuroscience and behavioral psychology. You are strict, direct, demanding, and completely unsparing with excuses. But everything you say is backed by science, and you are deeply invested in your client's success. Short sentences. Zero filler. No coddling.
 
-function buildDayPrompt(profile,observations,log){
-  const streak=profile.streak||0;
-  const bedrock=(profile.bedrockBlocks||[]).map(b=>b.time+"-"+b.end+" "+b.title).join(", ");
-  const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+" (streak "+h.streak+"d)").join("; ")||"none";
-  const recent=(log||[]).slice(-5).map(l=>l.date+": "+l.completed+"/"+l.total+" done, "+l.punishments+" punishments").join(" | ")||"no history";
-  const recentObs=(observations||[]).slice(-3).map(o=>o.date+": energy "+o.energy+"/5, chaos "+o.chaosLevel+"/5").join(" | ")||"none";
-  const fixedEvents=(profile.fixedEvents||[]).map(e=>e.day+" "+e.time+" "+e.title).join(", ")||"none";
-  const isLate=isLateNight();
-  const targetDateStr=isLate?new Date(tomorrowStr()).toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"}):dateStr();
-  return "Accountability coach for "+profile.name+". Time: "+timeStr()+". Building for: "+targetDateStr+".\n\n"+
-    "BEDROCK: "+bedrock+"\nFIXED EVENTS: "+fixedEvents+"\nHABITS: "+habits+"\nSTREAK: "+streak+"\n"+
-    "RECENT HISTORY: "+recent+"\nRECENT ENERGY/CHAOS: "+recentObs+"\n\n"+
-    "RULES:\n- Place each bedrock block at its committed time\n- Account for fixed events\n- Fill all gaps\n"+
-    "- Study blocks: specific subject + topic + active method\n"+
-    (isLate?"- Building for TOMORROW: start from wake time, full day\n":"- Building for TODAY: start from NOW ("+timeStr()+"), until sleep\n")+
-    "Output readable schedule first, then:\n"+
-    "<SCHEDULE>[{\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"Block\",\"type\":\"routine|study|meal|movement|free|sleep|buffer\",\"instruction\":\"details or none\"}]</SCHEDULE>";
-}
+CLIENT PROFILE:
+${JSON.stringify(PROFILE, null, 2)}
 
-function buildAuditPrompt(profile,log,schedule,observations){
-  const streak=profile.streak||0;
-  const bedrock=(profile.bedrockBlocks||[]).map((b,i)=>(i+1)+". "+b.time+" "+b.title).join("\n")||"none";
-  const habits=(profile.habits||[]).map(h=>h.name+": target "+h.target+" "+h.unit+", streak "+h.streak+"d").join("\n")||"none";
-  const recentObs=(observations||[]).slice(-7);
-  const patterns=detectPatterns(log||[],recentObs);
-  return "Auditing "+profile.name+"'s day. Streak: "+streak+"d.\n\n"+
-    "CONTROLLABLE=PUNISHMENT. UNCONTROLLABLE=LEGITIMATE.\n"+
-    "Controllable: avoidance, bad choices, tiredness from bad sleep or phone. Uncontrollable: emergencies, family, medical, genuine hard day.\n\n"+
-    "BEDROCK:\n"+bedrock+"\nHABITS:\n"+habits+"\n\n"+
-    (patterns.length?"PATTERNS:\n"+patterns.map(p=>"- "+p).join("\n")+"\n\n":"")+
-    "1. Ask them to report against each bedrock block\n2. For each miss: reason, controllable test, punish or accept\n"+
-    "3. Ask about each habit\n4. Ask wake time, sleep time, energy 1-5, chaos 1-5\n5. State what changes tomorrow\n\n"+
-    "<AUDIT>{\"date\":\""+todayStr()+"\",\"completed\":0,\"total\":"+(profile.bedrockBlocks||[]).length+",\"punishments\":0,\"streak\":"+streak+",\"habitUpdates\":[],\"wakeTime\":\"\",\"sleepTime\":\"\",\"energy\":3,\"chaosLevel\":3,\"notes\":\"\"}</AUDIT>";
-}
+═══════════════════════════════════════════════
+NEUROSCIENCE KNOWLEDGE BASE
+═══════════════════════════════════════════════
 
-function buildCoachPrompt(profile,schedule,observations){
-  const bedrock=(profile.bedrockBlocks||[]).map(b=>b.time+" "+b.title).join(", ");
-  const habits=(profile.habits||[]).map(h=>h.name+" target "+h.target+h.unit).join(", ");
-  const ctx=(schedule||[]).map((b,i)=>"["+i+"] "+b.time+"-"+b.end+" "+b.title).join(" | ");
-  const fixedEvents=(profile.fixedEvents||[]).map(e=>e.day+" "+e.time+" "+e.title).join(", ")||"none";
-  const recentObs=(observations||[]).slice(-3).map(o=>o.date+": energy "+o.energy+"/5").join(", ")||"none";
-  return "Accountability coach for "+(profile.name||"user")+". Streak: "+(profile.streak||0)+"d.\n"+
-    "Bedrock: "+bedrock+"\nFixed events: "+fixedEvents+"\nHabits: "+habits+"\nRecent energy: "+recentObs+"\n"+
-    "Schedule: "+ctx+"\nTime: "+timeStr()+"\n\n"+
-    "Max 3 sentences. Direct. Push back on excuses immediately.\n"+
-    "If user reports conflict or change: readjust schedule.\n"+
-    "PROFILE_UPDATE:{\"fixedEvents\":[{\"day\":\"\",\"time\":\"\",\"title\":\"\"}],\"notes\":\"\"} when you learn something new\n"+
-    "SCHEDULE_UPDATE:{\"index\":<n>,\"time\":\"HH:MM\",\"end\":\"HH:MM\",\"title\":\"...\",\"instruction\":\"...\"}\n"+
-    "REBUILD_NEEDED if full rebuild needed\n"+
-    "HABIT_HIT:<name> or HABIT_MISS:<name>\n"+
-    "EXAM_MODE:{\"name\":\"\",\"daysOut\":7} if user mentions exam";
-}
+DOPAMINE DYSREGULATION:
+Social media, pornography, and algorithm-driven video (YouTube, Netflix) are supernormal stimuli engineered to maximize dopamine response — exploiting the identical mesolimbic pathway as addictive drugs (Berridge & Robinson, 1998; Lembke, 2021). Chronic use raises the hedonic baseline: the brain recalibrates "normal" reward upward. The result is anhedonia toward ordinary tasks — studying feels neurologically unrewarding by comparison. Recovery requires structured abstinence (dopamine reset), not moderation. 2-4 weeks of abstinence allows receptor sensitivity to recover. This is not a character failure; it is neurochemistry. But it requires immediate, firm action.
 
-function detectPatterns(log,observations){
-  const p=[];
-  const l3=(log||[]).slice(-3);
-  if(l3.length>=3&&l3.every(l=>l.punishments>0))p.push("Punishments 3 days running");
-  if(l3.length>=3&&l3.every(l=>l.completed<l.total))p.push("Incomplete 3+ days — avoidance pattern");
-  const dayMap={};
-  (log||[]).forEach(l=>{if(l.completed<l.total){const d=new Date(l.date).toLocaleDateString([],{weekday:"long"});dayMap[d]=(dayMap[d]||0)+1;}});
-  Object.entries(dayMap).forEach(([day,count])=>{if(count>=2)p.push(day+" is a recurring problem day");});
-  if(observations&&observations.length>=3){
-    const avgE=observations.reduce((s,o)=>s+(o.energy||3),0)/observations.length;
-    if(avgE<2.5)p.push("Consistently low energy — schedule may be too heavy");
-    const avgC=observations.reduce((s,o)=>s+(o.chaosLevel||3),0)/observations.length;
-    if(avgC>3.5)p.push("High chaos average — more buffers needed");
+ULTRADIAN RHYTHMS:
+The brain operates in ~90-minute cycles of alertness and recovery (ultradian rhythm, Kleitman, 1982). Deep cognitive work should be scheduled in 90-minute blocks. The post-block trough is physiological — not laziness. Fighting it with caffeine or willpower leads to burnout. Work WITH biology.
+
+SLEEP & MEMORY CONSOLIDATION:
+During slow-wave sleep (SWS), the hippocampus replays learned material to the neocortex (memory consolidation, Stickgold & Walker, 2005). Sleeping under 7 hours reduces declarative memory encoding by up to 40% the following day (Walker, 2017). For a student: sleep IS studying. Non-negotiable.
+
+CORTISOL AWAKENING RESPONSE & SHIFT WORK:
+Shift work destroys the cortisol awakening response (CAR) — the cortisol spike in the first 30 minutes of waking that drives motivation, alertness, and cognitive readiness. The single most powerful fix: anchor wake time. Same wake-up time every day regardless of shift. This re-entrains the circadian clock faster than any other intervention (Czeisler et al., 1989).
+
+PREFRONTAL CORTEX DEPLETION:
+The PFC — governing impulse control, deep work, planning, and willpower — is most active in the early waking hours and depletes with every decision and effort throughout the day (Baumeister, 2007). Cognitive heavy lifting must come FIRST in the day. Placing it last guarantees failure.
+
+ZEIGARNIK EFFECT & ACTIVATION ENERGY:
+The hardest part is starting (activation energy). Once initiated, the brain creates unresolved psychological tension (Zeigarnik, 1927) that drives task completion. Exploit this: lower the activation threshold. Pre-stage the study environment (books open, app blocked, phone away) BEFORE it's time to study. Commit to only 2 minutes. The Zeigarnik effect takes over.
+
+═══════════════════════════════════════════════
+STUDY SCIENCE
+═══════════════════════════════════════════════
+
+ACTIVE RECALL: Self-testing is 2-3x more effective than re-reading (Roediger & Karpicke, 2006). Flashcards, practice problems, writing from memory — always over highlighting and re-reading.
+
+SPACED REPETITION: Review at expanding intervals (1 → 3 → 7 → 14 days). Exploits the spacing effect: slight forgetting before reviewing strengthens long-term memory encoding.
+
+POMODORO TECHNIQUE: 25 min focused work / 5 min break. Four cycles → 20-30 min break. Ideal for building the initial study habit — removes open-ended dread with time-bounded commitment.
+
+INTERLEAVING: Mixing subjects within a session (Math → Bio → History) is harder but produces 40% better long-term retention than blocking (Kornell & Bjork, 2008). Use on off-days when time allows.
+
+PRE-STUDY RITUAL: A fixed 5-minute ritual (same music, same physical setup, same location) creates a Pavlovian conditioned response for focus through associative conditioning. Must be identical every session.
+
+DEDICATED STUDY ENVIRONMENT: Study space used ONLY for studying. No entertainment, no eating, no social media in that space. Context-dependent memory encoding makes the location itself a focus trigger.
+
+═══════════════════════════════════════════════
+BEHAVIORAL PSYCHOLOGY
+═══════════════════════════════════════════════
+
+IMPLEMENTATION INTENTIONS (Gollwitzer, 1999): "When X happens, I will do Y" doubles habit follow-through vs. vague goals. Every habit must have a specific trigger.
+
+TEMPTATION BUNDLING (Milkman, 2021): Pair an undesirable task (studying) with a desired experience (specific playlist, special coffee) to increase approach motivation.
+
+IDENTITY-BASED HABITS (Clear, 2018): "I am a person who studies daily" is more powerful than "I want to study more." Behavior follows identity. Every log entry, every completed habit = a vote for that identity.
+
+ENVIRONMENTAL DESIGN: Removing choice is more powerful than willpower. Phone in another room > phone face-down. Website blocker active > relying on self-control. Design the environment, don't fight it.
+
+BEHAVIORAL ACTIVATION (Lewinsohn, 1974): Motivation follows action — not the reverse. Do not wait to feel ready. Schedule, execute, motivation emerges afterward. Always.
+
+LOSS AVERSION (Kahneman & Tversky, 1979): Humans feel losses ~2x more acutely than equivalent gains. Streaks, commitment devices, and public accountability leverage this asymmetry.
+
+═══════════════════════════════════════════════
+COACHING STYLE
+═══════════════════════════════════════════════
+
+Be direct. Be strict. Be precise. Short sentences. Science-first explanations.
+Every disruption is data — analyze it forensically. Every schedule is an experiment — iterate it ruthlessly.
+Call excuses what they are, then immediately give the solution.
+Never shame — digital addiction is neurochemistry, not character. But require action, not acceptance.
+Think 8 weeks ahead: Week 1 = foundation, Weeks 2-4 = consolidation, Weeks 5-8 = optimization.
+The schedule is never "wrong" — it is a hypothesis that gets refined.`;
+
+// ═══════════════════════════════════════════════════════════════
+// SCHEDULE JSON SCHEMA
+// ═══════════════════════════════════════════════════════════════
+const SCHEDULE_SCHEMA = `Return ONLY a valid JSON object matching this exact structure (no markdown, no extra keys, no preamble):
+{
+  "weekNumber": NUMBER,
+  "theme": "3-5 word theme",
+  "coachIntro": "2-3 strict sentences",
+  "weekFocus": "one sentence — the single #1 priority",
+  "weeklyTarget": "one specific measurable target",
+  "weekRules": ["rule 1", "rule 2", "rule 3", "rule 4"],
+  "dailyHabits": [
+    { "id": "h1", "name": "short habit name", "emoji": "single emoji", "category": "sleep|study|health|focus|digital" }
+  ],
+  "shiftDaySchedule": [
+    { "block": "Wake+0", "label": "activity name", "duration": "—", "type": "anchor", "note": "brief science-backed note" }
+  ],
+  "offDaySchedule": [
+    { "block": "Wake+0", "label": "activity name", "duration": "Xmin", "type": "anchor|study|health|meal|recovery|digital-free|sleep", "note": "brief note" }
+  ],
+  "studyStrategy": "2-3 sentence study approach for this week",
+  "habitReplacement": "2-3 sentence digital habit replacement plan"
+}`;
+
+// ═══════════════════════════════════════════════════════════════
+// API HELPER — Calls /api/axiom (server-side, key never exposed)
+// ═══════════════════════════════════════════════════════════════
+async function callAxiom(messages, jsonMode = false, maxTokens = 1024) {
+  const system = jsonMode
+    ? SYSTEM_PROMPT + '\n\nCRITICAL INSTRUCTION: Respond ONLY with a valid JSON object. No markdown fences. No preamble. No trailing text. Pure raw JSON starting with { and ending with }.'
+    : SYSTEM_PROMPT;
+
+  const res = await fetch('/api/axiom', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, system, maxTokens }),
+  });
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+
+  const text = (data.content || []).map((b) => b.text || '').join('\n');
+
+  if (jsonMode) {
+    // Strip any accidental markdown fences
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
   }
-  return p;
+  return text;
 }
 
-function Header({appMode,mode,numDays,streak,examMode}){
-  const [now,setNow]=useState(timeStr());
-  useEffect(()=>{const t=setInterval(()=>setNow(timeStr()),1000);return()=>clearInterval(t);},[]);
-  const modeBg={morning:C.accentFaint,executing:"#0a120a",audit:"#120a10"};
-  return(
-    <div style={{background:appMode==="observing"?"#0a0e14":modeBg[mode]||C.accentFaint,borderBottom:"1px solid "+C.border,padding:"13px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <div>
-          <div style={{color:C.accent,fontSize:11,fontWeight:600,letterSpacing:1,textTransform:"uppercase"}}>{appMode==="observing"?"Observing":"Coach"}</div>
-          <div style={{color:C.textDim,fontSize:11,marginTop:2}}>{dateStr()}</div>
-        </div>
-        <div style={{display:"flex",gap:6}}>
-          {appMode==="observing"&&<div style={{background:C.obs,border:"1px solid "+C.obsBorder,borderRadius:3,padding:"2px 7px",fontSize:9,color:"#4a8aaa",letterSpacing:1}}>{"DAY "+(numDays||0)+" OF 7"}</div>}
-          {appMode==="active"&&streak>0&&<div style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:3,padding:"2px 7px",fontSize:9,color:C.accent}}>{"🔥"+streak}</div>}
-          {examMode&&<div style={{background:"#2a1000",border:"1px solid #5a2a00",borderRadius:3,padding:"2px 7px",fontSize:9,color:"#c86420",letterSpacing:1}}>{"EXAM "+examMode.daysOut+"d"}</div>}
-        </div>
-      </div>
-      <div style={{color:C.text,fontSize:21,fontWeight:700,fontVariantNumeric:"tabular-nums",fontFamily:"monospace"}}>{now}</div>
-    </div>
-  );
-}
+// ═══════════════════════════════════════════════════════════════
+// STORAGE — localStorage wrappers with safe error handling
+// ═══════════════════════════════════════════════════════════════
+const db = {
+  get: (k) => {
+    try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }
+    catch { return null; }
+  },
+  set: (k, v) => {
+    try { localStorage.setItem(k, JSON.stringify(v)); }
+    catch (e) { console.warn('Storage write failed:', e); }
+  },
+};
 
-function ScheduleBlock({block,state}){
-  const isCur=state==="current",isPast=state==="past";
-  const ts={routine:{bg:C.routine,bl:C.routineBorder,lbl:"ROUTINE"},study:{bg:C.study,bl:C.studyBorder,lbl:"STUDY"},meal:{bg:C.meal,bl:C.mealBorder,lbl:"MEAL"},movement:{bg:C.movement,bl:C.movementBorder,lbl:"MOVE"},free:{bg:C.free,bl:C.freeBorder,lbl:"FREE"},sleep:{bg:C.sleep,bl:C.sleepBorder,lbl:"SLEEP"},buffer:{bg:C.buffer,bl:C.bufferBorder,lbl:""}}[block.type]||{bg:"transparent",bl:C.borderLight,lbl:""};
-  return(
-    <div style={{padding:isCur?"9px 12px":"6px 12px",borderRadius:6,marginBottom:2,background:isCur?"#1e1c18":ts.bg,borderLeft:"2px solid "+(isCur?C.accent:ts.bl),opacity:isPast?0.25:1}}>
-      <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <span style={{color:isCur?C.textMid:C.textDim,fontSize:10,minWidth:85,fontVariantNumeric:"tabular-nums",fontFamily:"monospace",flexShrink:0}}>{block.time}{"–"}{block.end}</span>
-        <span style={{color:isCur?C.text:isPast?C.textDim:"#c8c0b0",fontSize:isCur?13:12,fontWeight:isCur?600:400,flex:1,lineHeight:1.3}}>{block.title}</span>
-        {isCur&&<span style={{background:C.accent,color:"#000",fontSize:8,fontWeight:700,letterSpacing:1,padding:"2px 6px",borderRadius:3,flexShrink:0}}>NOW</span>}
-        {!isCur&&!isPast&&ts.lbl&&<span style={{color:C.textDim,fontSize:8,letterSpacing:1,flexShrink:0}}>{ts.lbl}</span>}
-      </div>
-      {block.instruction&&block.instruction!=="none"&&!isPast&&(
-        <div style={{marginTop:4,marginLeft:93,color:isCur?C.textMid:C.textDim,fontSize:10,lineHeight:1.5,fontStyle:"italic"}}>{block.instruction}</div>
-      )}
-    </div>
-  );
-}
+// ═══════════════════════════════════════════════════════════════
+// COLOR TOKENS
+// ═══════════════════════════════════════════════════════════════
+const C = {
+  bg:     '#05050f',
+  card:   '#09091e',
+  border: '#141430',
+  a:      '#5b5ef4',   // accent indigo
+  p:      '#8b5cf6',   // purple
+  g:      '#22c55e',   // green
+  y:      '#f59e0b',   // amber
+  r:      '#ef4444',   // red
+  tl:     '#2dd4bf',   // teal
+  txt:    '#eef0ff',
+  dim:    '#8890b8',
+  mut:    '#252840',
+  blockClr: {
+    anchor:         '#5b5ef4',
+    study:          '#22c55e',
+    health:         '#f59e0b',
+    meal:           '#ec4899',
+    recovery:       '#8b5cf6',
+    'digital-free': '#2dd4bf',
+    work:           '#64748b',
+    sleep:          '#7c3aed',
+  },
+  cat: {
+    sleep:   '#8b5cf6',
+    study:   '#22c55e',
+    health:  '#f59e0b',
+    focus:   '#5b5ef4',
+    digital: '#ef4444',
+  },
+};
 
-function SchedulePanel({blocks,appMode}){
-  const ref=useRef(null);
-  const ci=getCurIdx(blocks||[]);
-  useEffect(()=>{if(ref.current&&ci>=0){const els=ref.current.querySelectorAll("[data-idx]");if(els[ci])els[ci].scrollIntoView({block:"center",behavior:"smooth"});}},[ci,(blocks||[]).length]);
-  return(
-    <div style={{width:270,flexShrink:0,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",background:C.surface}}>
-      <div style={{padding:"9px 12px 6px",borderBottom:"1px solid "+C.borderLight,flexShrink:0}}>
-        <span style={{color:C.textDim,fontSize:9,letterSpacing:2,textTransform:"uppercase"}}>{appMode==="observing"?"Observation Period":"Today's Schedule"}</span>
-      </div>
-      <div ref={ref} style={{flex:1,overflowY:"auto",padding:"6px 4px"}}>
-        {appMode==="observing"?(
-          <div style={{padding:"16px 12px",color:C.textDim,fontSize:11,lineHeight:1.8}}>
-            <div style={{color:C.accent,fontSize:12,fontWeight:600,marginBottom:8}}>Coach is watching.</div>
-            <div>No schedule yet. Learning how your days actually work before building anything.</div>
-            <div style={{marginTop:12,color:C.textDim}}>Check in daily. After 7 days the coach will propose your bedrock.</div>
+// ═══════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════
+export default function AxiomApp() {
+  // ── Core state
+  const [tab, setTab]   = useState('schedule');
+  const [stab, setStab] = useState('rules');     // schedule sub-tab
+  const [sched, setSched] = useState(null);
+  const [wk, setWk]     = useState(1);
+
+  // ── Tracking state
+  const [habits, setHabits] = useState({});      // { dayIndex: [habitId, ...] }
+  const [logs, setLogs]     = useState([]);       // daily log array
+
+  // ── UI state
+  const [chat, setChat]     = useState([]);
+  const [chatIn, setChatIn] = useState('');
+  const [cLoad, setCLoad]   = useState(false);
+  const [gen, setGen]       = useState(false);
+  const [gMsg, setGMsg]     = useState('');
+  const [genErr, setGenErr] = useState(null);
+  const [rev, setRev]       = useState({ rating: 3, wins: '', struggles: '', notes: '' });
+  const [dlog, setDlog]     = useState({ energy: 3, disrupts: '', notes: '' });
+  const [dHabs, setDHabs]   = useState([]);
+  const [logSaved, setLogSaved] = useState(false);
+
+  const cRef = useRef(null);
+
+  // ── Init on mount — load persisted data or generate Week 1
+  useEffect(() => {
+    const sc = db.get('ax_sched');
+    const wn = db.get('ax_wk');
+    const hb = db.get('ax_habits');
+    const lg = db.get('ax_logs');
+    const ch = db.get('ax_chat');
+
+    if (sc) setSched(sc);
+    if (wn) setWk(wn);
+    if (hb) setHabits(hb);
+    if (lg) setLogs(lg);
+    if (ch) setChat(ch);
+    if (!sc) buildWeek(1, null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    cRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chat, cLoad]);
+
+  // ═══════════════════════════════════════════════════════════
+  // BUILD / REBUILD SCHEDULE
+  // ═══════════════════════════════════════════════════════════
+  const buildWeek = useCallback(async (n, reviewData) => {
+    setGen(true);
+    setGenErr(null);
+
+    const steps = n === 1
+      ? [
+          'Profiling your lifestyle...',
+          'Mapping neurological constraints...',
+          'Calibrating evidence-based protocols...',
+          'Generating Week 1 schedule...',
+        ]
+      : [
+          `Processing Week ${n - 1} performance data...`,
+          'Analyzing habit compliance patterns...',
+          'Recalibrating schedule architecture...',
+          `Building Week ${n}...`,
+        ];
+
+    for (const step of steps) {
+      setGMsg(step);
+      await new Promise((r) => setTimeout(r, 750));
+    }
+
+    const isFirst = n === 1;
+
+    const prompt = isFirst
+      ? `Generate the Week 1 foundation schedule.\n${SCHEDULE_SCHEMA}\n\nCONSTRAINTS:\n- Include exactly 5-6 daily habits.\n- Shift day: 6-8 blocks (work takes most of the day; be realistic).\n- Off day: 10-13 blocks (full structure, more study time).\n- Week 1 is FOUNDATION ONLY — minimum viable protocol. The study target is ONE Pomodoro (25 min) per day. Win small first. Build momentum before adding volume.\n- Keep block notes under 12 words each.`
+      : `Week ${n - 1} review data:\n- Overall rating: ${reviewData.rating}/5\n- What worked: "${reviewData.wins}"\n- What failed: "${reviewData.struggles}"\n- Additional context: "${reviewData.notes}"\n\nGenerate Week ${n} adjusted schedule.\n${SCHEDULE_SCHEMA.replace('NUMBER', n)}\n\nADJUSTMENT LOGIC:\n- Rating 1-2: Simplify significantly. Remove 1-2 habits. Reduce off-day blocks. The system was too demanding.\n- Rating 3: Minor tweaks. Adjust 1-2 habits. Small difficulty increase in one area.\n- Rating 4-5: Add measured challenge. Increase study target by 1 Pomodoro. Add one new habit.\n- In coachIntro: directly reference what happened in Week ${n - 1} and why these specific adjustments are being made. Be analytical and specific.`;
+
+    try {
+      const sc = await callAxiom([{ role: 'user', content: prompt }], true, 2500);
+      setSched(sc);
+      setWk(n);
+      db.set('ax_sched', sc);
+      db.set('ax_wk', n);
+
+      if (!isFirst) {
+        setHabits({});
+        setLogs([]);
+        setRev({ rating: 3, wins: '', struggles: '', notes: '' });
+        db.set('ax_habits', {});
+        db.set('ax_logs', []);
+      }
+
+      setTab('schedule');
+      setStab('rules');
+    } catch (err) {
+      console.error('Build error:', err);
+      setGenErr(`Failed: ${err.message}. Check your ANTHROPIC_API_KEY and try again.`);
+    }
+
+    setGen(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ═══════════════════════════════════════════════════════════
+  // COACH CHAT
+  // ═══════════════════════════════════════════════════════════
+  const sendChat = useCallback(async () => {
+    if (!chatIn.trim() || cLoad) return;
+    const m = chatIn.trim();
+    const updated = [...chat, { role: 'user', content: m }];
+    setChat(updated);
+    setChatIn('');
+    setCLoad(true);
+
+    try {
+      // Inject context into user's message for the API call
+      const ctx = `[Context: Week ${wk}, Theme: "${sched?.theme}"]\n${m}`;
+      const apiHistory = [...updated.slice(0, -1), { role: 'user', content: ctx }].slice(-14);
+      const reply = await callAxiom(apiHistory.map((x) => ({ role: x.role, content: x.content })));
+      const final = [...updated, { role: 'assistant', content: reply }];
+      setChat(final);
+      db.set('ax_chat', final.slice(-20));
+    } catch (e) {
+      console.error('Chat error:', e);
+    }
+
+    setCLoad(false);
+  }, [chatIn, chat, cLoad, wk, sched]);
+
+  // ═══════════════════════════════════════════════════════════
+  // DAILY LOG
+  // ═══════════════════════════════════════════════════════════
+  const saveLog = useCallback(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const entry = { date: today, energy: dlog.energy, disrupts: dlog.disrupts, notes: dlog.notes, habits: dHabs };
+    const upd = [...logs.filter((l) => l.date !== today), entry];
+    setLogs(upd);
+    setDHabs([]);
+    db.set('ax_logs', upd);
+    setLogSaved(true);
+    setTimeout(() => setLogSaved(false), 2500);
+  }, [dlog, dHabs, logs]);
+
+  // ═══════════════════════════════════════════════════════════
+  // HABIT TOGGLE
+  // ═══════════════════════════════════════════════════════════
+  const toggleHabit = useCallback((dayIdx, hid) => {
+    const cur = habits[dayIdx] || [];
+    const upd = {
+      ...habits,
+      [dayIdx]: cur.includes(hid) ? cur.filter((h) => h !== hid) : [...cur, hid],
+    };
+    setHabits(upd);
+    db.set('ax_habits', upd);
+  }, [habits]);
+
+  // ═══════════════════════════════════════════════════════════
+  // GENERATING SCREEN
+  // ═══════════════════════════════════════════════════════════
+  if (gen) {
+    return (
+      <div style={{ background: C.bg, minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', padding: '0 24px' }}>
+          <div style={{ fontSize: 68, color: C.a, animation: 'axiomPulse 1.8s ease-in-out infinite', marginBottom: 22, lineHeight: 1, display: 'block' }}>
+            ⬡
           </div>
-        ):!(blocks||[]).length?(
-          <div style={{padding:"20px 12px",color:C.textFaint,fontSize:11,textAlign:"center",lineHeight:1.8}}>Building…</div>
-        ):(blocks||[]).map((b,i)=>(
-          <div key={i} data-idx={i}><ScheduleBlock block={b} state={i===ci?"current":i<ci?"past":"future"}/></div>
+          <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: 10, color: C.txt, marginBottom: 6, fontFamily: 'var(--font-display)' }}>
+            AXIOM
+          </div>
+          <div style={{ fontSize: 10, letterSpacing: 6, color: C.dim, marginBottom: 56, fontFamily: 'var(--font-mono)' }}>
+            SCHEDULE INTELLIGENCE SYSTEM
+          </div>
+          <div style={{ fontSize: 13, color: C.txt, letterSpacing: 2, marginBottom: 26, minHeight: 20, fontFamily: 'var(--font-mono)', animation: 'fadeUp .3s ease' }}>
+            {gMsg}
+          </div>
+          <div style={{ width: 280, height: 2, background: C.border, borderRadius: 2, margin: '0 auto' }}>
+            <div style={{ height: '100%', width: '68%', background: `linear-gradient(90deg, ${C.a}, ${C.p})`, borderRadius: 2, transition: 'width .7s ease' }} />
+          </div>
+          {genErr && (
+            <div style={{ marginTop: 32, color: C.r, fontSize: 13, lineHeight: 1.6, maxWidth: 320 }}>
+              {genErr}
+              <button
+                onClick={() => buildWeek(wk, null)}
+                style={{ display: 'block', margin: '16px auto 0', padding: '9px 22px', background: C.a, border: 'none', borderRadius: 7, color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, letterSpacing: 1, fontFamily: 'var(--font-mono)' }}
+              >
+                RETRY
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // LOADING (mounted but no schedule yet)
+  // ═══════════════════════════════════════════════════════════
+  if (!sched) {
+    return (
+      <div style={{ background: C.bg, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.a, fontSize: 13, letterSpacing: 4, fontFamily: 'var(--font-mono)' }}>
+        INITIALIZING...
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // HELPERS
+  // ═══════════════════════════════════════════════════════════
+  const bc = (t) => C.blockClr[t] || C.a;
+  const cc = (c) => C.cat[c] || C.a;
+  const todayDI = (new Date().getDay() + 6) % 7; // Mon=0
+  const todayStr = new Date().toLocaleDateString('en-AU', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  // Style helpers (defined fresh each render — acceptable for this app)
+  const cardS   = (x = {}) => ({ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 12, ...x });
+  const lblS    = (color = C.dim) => ({ fontSize: 10, fontWeight: 700, letterSpacing: 3, color, marginBottom: 9, fontFamily: 'var(--font-mono)' });
+  const textareaS = (x = {}) => ({ width: '100%', background: C.bg, border: `1px solid ${C.border}`, borderRadius: 7, padding: 11, color: C.txt, fontSize: 13, lineHeight: 1.6, resize: 'none', outline: 'none', minHeight: 80, fontFamily: 'var(--font-body)', ...x });
+
+  const TABS = [
+    { id: 'schedule', icon: '▦', label: 'SCHED' },
+    { id: 'daily',    icon: '◈', label: 'DAILY' },
+    { id: 'habits',   icon: '◉', label: 'HABITS' },
+    { id: 'review',   icon: '◎', label: 'REVIEW' },
+    { id: 'chat',     icon: '⬡', label: 'COACH' },
+  ];
+
+  // ═══════════════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════════════
+  return (
+    <div style={{ background: C.bg, minHeight: '100vh', maxWidth: 520, margin: '0 auto', color: C.txt, fontFamily: 'var(--font-body)' }}>
+
+      {/* ── HEADER ────────────────────────────────────────── */}
+      <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ color: C.a, fontSize: 20, lineHeight: 1 }}>⬡</span>
+          <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: 5, fontFamily: 'var(--font-display)' }}>AXIOM</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, color: C.dim, fontFamily: 'var(--font-mono)' }}>{todayStr}</span>
+          <span style={{ background: `${C.a}22`, border: `1px solid ${C.a}40`, borderRadius: 4, padding: '3px 9px', fontSize: 10, fontWeight: 800, letterSpacing: 2, color: C.a, fontFamily: 'var(--font-mono)' }}>
+            WK{wk}
+          </span>
+        </div>
+      </div>
+
+      {/* ── CONTENT ───────────────────────────────────────── */}
+      <div style={{ paddingBottom: 68 }}>
+
+        {/* ════════════════ SCHEDULE TAB ════════════════ */}
+        {tab === 'schedule' && (
+          <div style={{ padding: 18 }}>
+            {/* Banner */}
+            <div style={{ background: `linear-gradient(135deg, ${C.a}1c, ${C.p}12)`, border: `1px solid ${C.a}28`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
+              <div style={{ ...lblS(C.a), marginBottom: 5 }}>WEEK {wk} PROTOCOL</div>
+              <div style={{ fontSize: 26, fontWeight: 700, color: C.txt, marginBottom: 5, fontFamily: 'var(--font-display)', letterSpacing: 1, lineHeight: 1.2 }}>
+                {sched.theme}
+              </div>
+              <div style={{ fontSize: 13, color: C.dim, fontStyle: 'italic', lineHeight: 1.5 }}>{sched.weekFocus}</div>
+            </div>
+
+            {/* Briefing */}
+            <div style={{ ...cardS({ borderLeft: `3px solid ${C.a}`, marginBottom: 14 }) }}>
+              <div style={lblS(C.a)}>AXIOM BRIEFING</div>
+              <p style={{ fontSize: 13, color: C.dim, lineHeight: 1.8, margin: '0 0 12px' }}>{sched.coachIntro}</p>
+              <div style={{ padding: '7px 11px', background: `${C.g}14`, border: `1px solid ${C.g}28`, borderRadius: 7 }}>
+                <span style={{ fontSize: 10, color: C.g, fontWeight: 700, letterSpacing: 2, fontFamily: 'var(--font-mono)' }}>TARGET: </span>
+                <span style={{ fontSize: 12, color: C.txt }}>{sched.weeklyTarget}</span>
+              </div>
+            </div>
+
+            {/* Sub-tab pills */}
+            <div style={{ display: 'flex', gap: 5, marginBottom: 16, padding: 4, background: C.card, borderRadius: 10, border: `1px solid ${C.border}` }}>
+              {[['rules', 'RULES'], ['shift', 'SHIFT'], ['off', 'OFF DAY'], ['study', 'STUDY']].map(([id, lbl]) => (
+                <button key={id} onClick={() => setStab(id)} style={{ flex: 1, padding: '7px 3px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: 1, background: stab === id ? C.a : 'transparent', color: stab === id ? '#fff' : C.mut, transition: 'all .15s', fontFamily: 'var(--font-mono)' }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+
+            {/* Rules sub-tab */}
+            {stab === 'rules' && (sched.weekRules || []).map((r, i) => (
+              <div key={i} style={{ display: 'flex', gap: 13, alignItems: 'flex-start', ...cardS({ padding: '12px 14px', marginBottom: 9 }) }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: C.a, fontFamily: 'var(--font-mono)', minWidth: 22, flexShrink: 0, lineHeight: 1.6 }}>
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <span style={{ fontSize: 13, lineHeight: 1.6 }}>{r}</span>
+              </div>
+            ))}
+
+            {/* Shift / Off-day schedule sub-tabs */}
+            {(stab === 'shift' || stab === 'off') && (() => {
+              const blocks = stab === 'shift' ? sched.shiftDaySchedule : sched.offDaySchedule;
+              return (
+                <div>
+                  <div style={{ fontSize: 10, color: C.mut, textAlign: 'center', letterSpacing: 2, marginBottom: 14, fontFamily: 'var(--font-mono)' }}>
+                    {stab === 'shift' ? '⚙ WORKING SHIFT — Minimum viable protocol' : '📚 DAY OFF — Full structure. No exceptions.'}
+                  </div>
+                  {(blocks || []).map((b, i) => (
+                    <div key={i} style={{ display: 'flex', background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 9, overflow: 'hidden' }}>
+                      <div style={{ width: 4, background: bc(b.type), flexShrink: 0 }} />
+                      <div style={{ padding: '11px 13px', flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                          <span style={{ fontSize: 11, color: bc(b.type), fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{b.block}</span>
+                          <span style={{ fontSize: 11, color: C.mut, fontFamily: 'var(--font-mono)' }}>{b.duration}</span>
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.3 }}>{b.label}</div>
+                        {b.note && <div style={{ fontSize: 11, color: C.dim, marginTop: 4, fontStyle: 'italic', lineHeight: 1.4 }}>{b.note}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Study plan sub-tab */}
+            {stab === 'study' && (
+              <div>
+                {[
+                  { c: C.g, t: 'STUDY PROTOCOL', txt: sched.studyStrategy },
+                  { c: C.r, t: 'DIGITAL HABIT OVERRIDE', txt: sched.habitReplacement },
+                ].map(({ c, t, txt }) => (
+                  <div key={t} style={{ ...cardS({ borderLeft: `3px solid ${c}` }) }}>
+                    <div style={lblS(c)}>{t}</div>
+                    <p style={{ fontSize: 13, color: C.dim, lineHeight: 1.8, margin: 0 }}>{txt}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ════════════════ DAILY LOG TAB ════════════════ */}
+        {tab === 'daily' && (
+          <div style={{ padding: 18 }}>
+            <div style={{ ...lblS(C.a), marginBottom: 4 }}>DAILY LOG</div>
+            <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 20, fontFamily: 'var(--font-display)', letterSpacing: 0.5 }}>{todayStr}</div>
+
+            {/* Energy level */}
+            <div style={cardS()}>
+              <div style={lblS()}>ENERGY LEVEL</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} onClick={() => setDlog({ ...dlog, energy: n })} style={{ flex: 1, padding: '11px 0', borderRadius: 8, border: `2px solid ${dlog.energy === n ? C.y : C.border}`, background: dlog.energy === n ? `${C.y}20` : 'transparent', cursor: 'pointer', fontSize: 15, fontWeight: 800, color: dlog.energy === n ? C.y : C.mut, transition: 'all .15s' }}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, color: C.mut, textAlign: 'center', marginTop: 7, fontFamily: 'var(--font-mono)', letterSpacing: 2 }}>
+                {['', 'DEPLETED', 'LOW', 'MODERATE', 'GOOD', 'PEAK'][dlog.energy]}
+              </div>
+            </div>
+
+            {/* Habits done today */}
+            <div style={cardS()}>
+              <div style={lblS()}>HABITS DONE TODAY</div>
+              {(sched.dailyHabits || []).map((h) => {
+                const done = dHabs.includes(h.id);
+                return (
+                  <div key={h.id} onClick={() => setDHabs((p) => done ? p.filter((x) => x !== h.id) : [...p, h.id])} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
+                    <div style={{ width: 22, height: 22, borderRadius: 5, border: `2px solid ${done ? cc(h.category) : C.border}`, background: done ? cc(h.category) : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .15s' }}>
+                      {done && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800 }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize: 13, color: done ? C.txt : C.dim, transition: 'color .15s' }}>{h.emoji} {h.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Disruptions */}
+            <div style={cardS()}>
+              <div style={lblS()}>DISRUPTIONS / OFF-PLAN MOMENTS</div>
+              <textarea
+                value={dlog.disrupts}
+                onChange={(e) => setDlog({ ...dlog, disrupts: e.target.value })}
+                placeholder="Be specific. Every disruption is data for AXIOM to analyze."
+                style={textareaS()}
+              />
+            </div>
+
+            {/* Notes */}
+            <div style={cardS()}>
+              <div style={lblS()}>NOTES</div>
+              <textarea
+                value={dlog.notes}
+                onChange={(e) => setDlog({ ...dlog, notes: e.target.value })}
+                placeholder="Context, observations, mental state, shift schedule..."
+                style={textareaS({ minHeight: 60 })}
+              />
+            </div>
+
+            <button onClick={saveLog} style={{ width: '100%', padding: 15, background: logSaved ? C.g : C.a, border: 'none', borderRadius: 11, color: '#fff', fontSize: 13, fontWeight: 800, letterSpacing: 2, cursor: 'pointer', transition: 'background .3s', fontFamily: 'var(--font-mono)' }}>
+              {logSaved ? '✓  LOGGED — AXIOM IS WATCHING' : 'SUBMIT DAILY LOG'}
+            </button>
+          </div>
+        )}
+
+        {/* ════════════════ HABITS TAB ════════════════ */}
+        {tab === 'habits' && (() => {
+          const total    = Object.values(habits).reduce((a, hs) => a + hs.length, 0);
+          const possible = (sched.dailyHabits || []).length * 7;
+          const pct      = possible > 0 ? Math.round((total / possible) * 100) : 0;
+          const pClr     = pct >= 70 ? C.g : pct >= 40 ? C.y : C.r;
+          return (
+            <div style={{ padding: 18 }}>
+              <div style={{ ...lblS(C.a), marginBottom: 4 }}>HABIT TRACKER</div>
+              <div style={{ fontSize: 13, color: C.dim, marginBottom: 20 }}>Week {wk} — tap any cell to mark complete</div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: 360 }}>
+                  {/* Day headers */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '140px repeat(7, 1fr)', gap: 4, marginBottom: 10 }}>
+                    <div />
+                    {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+                      <div key={i} style={{ textAlign: 'center', fontSize: 10, fontWeight: 700, color: i === todayDI ? C.a : C.mut, fontFamily: 'var(--font-mono)', padding: '4px 0' }}>{d}</div>
+                    ))}
+                  </div>
+                  {/* Habit rows */}
+                  {(sched.dailyHabits || []).map((h) => (
+                    <div key={h.id} style={{ display: 'grid', gridTemplateColumns: '140px repeat(7, 1fr)', gap: 4, marginBottom: 7, alignItems: 'center' }}>
+                      <div style={{ fontSize: 11, color: C.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>
+                        {h.emoji} {h.name}
+                      </div>
+                      {[0, 1, 2, 3, 4, 5, 6].map((di) => {
+                        const done = (habits[di] || []).includes(h.id);
+                        const clr  = cc(h.category);
+                        return (
+                          <button key={di} onClick={() => toggleHabit(di, h.id)} style={{ height: 34, borderRadius: 6, border: `1px solid ${done ? clr : C.border}`, background: done ? `${clr}28` : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'all .15s' }}>
+                            {done && <span style={{ color: clr, fontSize: 11, fontWeight: 800 }}>✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Completion summary */}
+              <div style={{ ...cardS({ marginTop: 20 }) }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 10 }}>
+                  <div style={lblS()}>WEEK COMPLETION</div>
+                  <div style={{ fontSize: 40, fontWeight: 700, color: pClr, fontFamily: 'var(--font-display)', lineHeight: 1 }}>{pct}%</div>
+                </div>
+                <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: 'hidden', marginBottom: 9 }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: pClr, borderRadius: 3, transition: 'width .5s ease' }} />
+                </div>
+                <div style={{ fontSize: 12, color: C.dim }}>{total} / {possible} habit completions this week</div>
+                {pct < 40 && (
+                  <div style={{ fontSize: 12, color: C.r, marginTop: 10, lineHeight: 1.6, fontStyle: 'italic' }}>
+                    Below 40%. The system needs recalibration — not you. Run the weekly review and be honest about what failed.
+                  </div>
+                )}
+                {pct >= 70 && (
+                  <div style={{ fontSize: 12, color: C.g, marginTop: 10, lineHeight: 1.6, fontStyle: 'italic' }}>
+                    Strong execution. The habit architecture is working. Hold the line through the end of the week.
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ════════════════ REVIEW TAB ════════════════ */}
+        {tab === 'review' && (
+          <div style={{ padding: 18 }}>
+            <div style={{ ...lblS(C.a), marginBottom: 4 }}>WEEKLY DEBRIEF</div>
+            <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 7, fontFamily: 'var(--font-display)', letterSpacing: 0.5 }}>Week {wk} Review</div>
+            <p style={{ fontSize: 13, color: C.dim, lineHeight: 1.75, marginBottom: 22 }}>
+              Brutal honesty required. Vague answers produce generic schedules. Your Week {wk + 1} is built entirely from this data.
+            </p>
+
+            {/* Rating */}
+            <div style={cardS()}>
+              <div style={lblS()}>OVERALL RATING</div>
+              <div style={{ display: 'flex', gap: 7 }}>
+                {[[1, 'DISASTER'], [2, 'ROUGH'], [3, 'OKAY'], [4, 'SOLID'], [5, 'CRUSHED']].map(([n, lbl]) => (
+                  <button key={n} onClick={() => setRev({ ...rev, rating: n })} style={{ flex: 1, padding: '11px 4px', borderRadius: 9, border: `2px solid ${rev.rating === n ? C.a : C.border}`, background: rev.rating === n ? `${C.a}20` : 'transparent', cursor: 'pointer', transition: 'all .15s' }}>
+                    <div style={{ fontSize: 16, fontWeight: 900, color: rev.rating === n ? C.a : C.mut }}>{n}</div>
+                    <div style={{ fontSize: 8, color: rev.rating === n ? C.a : C.mut, marginTop: 3, fontFamily: 'var(--font-mono)', letterSpacing: 1 }}>{lbl}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {[
+              { k: 'wins',      lbl: 'WHAT WORKED?',                   ph: 'Habits held, study sessions done, unexpected wins...' },
+              { k: 'struggles', lbl: 'WHAT FELL APART?',               ph: 'Specific failures, what derailed you, skipped habits...' },
+              { k: 'notes',     lbl: 'WHAT SHOULD AXIOM FACTOR IN?',   ph: 'Shift changes, life events, sleep quality, mental state...' },
+            ].map(({ k, lbl, ph }) => (
+              <div key={k} style={cardS()}>
+                <div style={lblS()}>{lbl}</div>
+                <textarea value={rev[k]} onChange={(e) => setRev({ ...rev, [k]: e.target.value })} placeholder={ph} style={textareaS()} />
+              </div>
+            ))}
+
+            <button onClick={() => buildWeek(wk + 1, rev)} style={{ width: '100%', padding: 16, background: `linear-gradient(135deg, ${C.a}, ${C.p})`, border: 'none', borderRadius: 11, color: '#fff', fontSize: 13, fontWeight: 800, letterSpacing: 2, cursor: 'pointer', marginTop: 6, fontFamily: 'var(--font-mono)' }}>
+              GENERATE WEEK {wk + 1} →
+            </button>
+
+            {/* Reset option */}
+            <div style={{ textAlign: 'center', marginTop: 22 }}>
+              <button onClick={() => { if (window.confirm('Reset all AXIOM data and start from Week 1?')) { localStorage.clear(); window.location.reload(); } }} style={{ background: 'none', border: 'none', color: C.mut, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', letterSpacing: 1 }}>
+                ↺ RESET ALL DATA
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════ COACH CHAT TAB ════════════════ */}
+        {tab === 'chat' && (
+          <div>
+            <div style={{ padding: '18px 18px 90px', minHeight: 'calc(100vh - 130px)' }}>
+              {/* Empty state */}
+              {chat.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '50px 24px', animation: 'fadeUp .4s ease' }}>
+                  <div style={{ fontSize: 52, color: C.a, marginBottom: 16 }}>⬡</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 5, color: C.a, marginBottom: 10, fontFamily: 'var(--font-mono)' }}>AXIOM ONLINE</div>
+                  <div style={{ fontSize: 13, color: C.dim, lineHeight: 1.8, marginBottom: 30 }}>
+                    Direct line to your coach. Ask about disruptions, the neuroscience behind your protocol, habit failures, or anything blocking you.
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                    {[
+                      "Why can't I make myself start studying?",
+                      'I missed 3 days in a row. What now?',
+                      'How do I break the phone-in-bed habit?',
+                      'Explain the neuroscience behind my schedule.',
+                    ].map((q) => (
+                      <button key={q} onClick={() => setChatIn(q)} style={{ padding: '10px 15px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 9, color: C.dim, fontSize: 12, cursor: 'pointer', textAlign: 'left', lineHeight: 1.5, transition: 'border-color .15s' }}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Chat messages */}
+              {chat.map((m, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 12, gap: 9, alignItems: 'flex-end' }}>
+                  {m.role === 'assistant' && (
+                    <div style={{ width: 28, height: 28, borderRadius: 7, background: C.a, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>⬡</div>
+                  )}
+                  <div style={{ maxWidth: '80%', padding: '11px 14px', borderRadius: m.role === 'user' ? '13px 13px 4px 13px' : '13px 13px 13px 4px', background: m.role === 'user' ? C.a : C.card, border: m.role === 'user' ? 'none' : `1px solid ${C.border}`, fontSize: 13, lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+
+              {/* Typing indicator */}
+              {cLoad && (
+                <div style={{ display: 'flex', gap: 9, alignItems: 'flex-end', marginBottom: 12 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 7, background: C.a, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>⬡</div>
+                  <div style={{ padding: '12px 16px', borderRadius: '13px 13px 13px 4px', background: C.card, border: `1px solid ${C.border}`, display: 'flex', gap: 5, alignItems: 'center' }}>
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: C.a, animation: `dotPulse 1.2s ${i * 0.2}s infinite` }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div ref={cRef} />
+            </div>
+
+            {/* Chat input */}
+            <div style={{ position: 'fixed', bottom: 58, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 520, background: C.card, borderTop: `1px solid ${C.border}`, padding: '11px 16px', display: 'flex', gap: 9, zIndex: 15 }}>
+              <input
+                value={chatIn}
+                onChange={(e) => setChatIn(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendChat()}
+                placeholder="Ask AXIOM anything..."
+                style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 13px', color: C.txt, fontSize: 13, outline: 'none', fontFamily: 'var(--font-body)' }}
+              />
+              <button onClick={sendChat} disabled={!chatIn.trim() || cLoad} style={{ padding: '10px 16px', background: chatIn.trim() ? C.a : C.mut, border: 'none', borderRadius: 8, color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', transition: 'background .15s' }}>→</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── BOTTOM NAV ─────────────────────────────────────── */}
+      <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 520, background: C.card, borderTop: `1px solid ${C.border}`, display: 'flex', zIndex: 20 }}>
+        {TABS.map(({ id, icon, label }) => (
+          <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: '10px 0 8px', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <span style={{ fontSize: 16, color: tab === id ? C.a : C.mut, transition: 'color .15s' }}>{icon}</span>
+            <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: 1, color: tab === id ? C.a : C.mut, fontFamily: 'var(--font-mono)', transition: 'color .15s' }}>{label}</span>
+          </button>
         ))}
       </div>
     </div>
   );
-}
-
-function MessageBubble({msg}){
-  const isUser=msg.role==="user";
-  return(
-    <div style={{alignSelf:isUser?"flex-end":"flex-start",maxWidth:"82%"}}>
-      {!isUser&&<div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div>}
-      <div style={{background:isUser?C.accentFaint:C.surface,border:"1px solid "+(isUser?C.accentDim:C.border),color:isUser?C.text:"#c0b8a8",fontSize:13,lineHeight:1.7,padding:"10px 14px",borderRadius:isUser?"8px 8px 2px 8px":"8px 8px 8px 2px",whiteSpace:"pre-wrap"}}>{msg.text}</div>
-    </div>
-  );
-}
-
-function ChatPanel({messages,loading,feedRef}){
-  return(
-    <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"flex",flexDirection:"column",gap:12}}>
-      {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your coach is ready.</div>}
-      {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
-      {loading&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
-    </div>
-  );
-}
-
-function InputBar({value,onChange,onSend,disabled,placeholder}){
-  return(
-    <div style={{borderTop:"1px solid "+C.border,padding:"12px 20px",background:C.surface,display:"flex",gap:10,flexShrink:0}}>
-      <input style={{flex:1,background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:14,outline:"none",fontFamily:"inherit"}}
-        placeholder={placeholder||"Talk to your coach…"} value={value}
-        onChange={e=>onChange(e.target.value)}
-        onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey)onSend();}}
-        disabled={disabled}
-        onFocus={e=>e.target.style.borderColor=C.accentDim}
-        onBlur={e=>e.target.style.borderColor=C.border}/>
-      <button onClick={onSend} disabled={disabled} style={{background:C.accent,color:"#000",border:"none",borderRadius:8,width:44,fontSize:16,fontWeight:700,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.5:1,flexShrink:0}}>↑</button>
-    </div>
-  );
-}
-
-function CheckIn({onSubmit,type}){
-  const [wakeTime,setWakeTime]=useState("");
-  const [sleepTime,setSleepTime]=useState("");
-  const [energy,setEnergy]=useState(3);
-  const [chaos,setChaos]=useState(3);
-  const [onTrack,setOnTrack]=useState("Yes, on track");
-  const [notes,setNotes]=useState("");
-  const eLabels=["","Very low","Low","Okay","Good","Sharp"];
-  const cLabels=["","Very stable","Mostly stable","Some disruption","Chaotic","Total chaos"];
-  return(
-    <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"16px",margin:"8px 0",display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{color:C.accent,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>{type==="morning"?"Morning Check-in":type==="afternoon"?"Afternoon Check-in":"Evening Report"}</div>
-      {type==="morning"&&<div><div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time did you wake up?</div><input value={wakeTime} onChange={e=>setWakeTime(e.target.value)} placeholder="e.g. 08:30" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>}
-      {type==="evening"&&<div><div style={{color:C.textDim,fontSize:11,marginBottom:6}}>What time are you sleeping?</div><input value={sleepTime} onChange={e=>setSleepTime(e.target.value)} placeholder="e.g. 23:30" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>}
-      {type==="afternoon"&&<div><div style={{color:C.textDim,fontSize:11,marginBottom:8}}>Are you on track?</div><div style={{display:"flex",gap:8}}>{["Yes, on track","Slightly behind","Off track"].map(opt=><button key={opt} onClick={()=>setOnTrack(opt)} style={{flex:1,padding:"7px 4px",background:onTrack===opt?C.accent:"#1a1814",border:"1px solid "+(onTrack===opt?C.accent:C.border),borderRadius:5,cursor:"pointer",color:onTrack===opt?"#000":C.textDim,fontSize:11}}>{opt}</button>)}</div></div>}
-      {[["Energy",energy,setEnergy,eLabels],["Day chaos",chaos,setChaos,cLabels]].map(([label,val,set,labels])=>(
-        <div key={label}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{color:C.textDim,fontSize:11}}>{label}</span><span style={{color:C.textMid,fontSize:11}}>{labels[val]}</span></div>
-          <div style={{display:"flex",gap:5}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>set(n)} style={{flex:1,padding:"7px 0",background:val>=n?C.accent:"#1a1814",border:"1px solid "+(val>=n?C.accent:C.border),borderRadius:4,cursor:"pointer",color:val>=n?"#000":C.textDim,fontSize:12,fontWeight:600}}>{n}</button>)}</div>
-        </div>
-      ))}
-      <div><div style={{color:C.textDim,fontSize:11,marginBottom:6}}>{type==="afternoon"?"Anything that came up?":"Anything notable? (optional)"}</div><input value={notes} onChange={e=>setNotes(e.target.value)} placeholder={type==="afternoon"?"e.g. class ran long, unexpected errand…":"e.g. classes, events, how you felt…"} style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>
-      <button onClick={()=>onSubmit({wakeTime,sleepTime,energy,chaosLevel:chaos,onTrack,notes,date:todayStr(),type})} style={{background:C.accent,color:"#000",border:"none",borderRadius:6,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Submit</button>
-    </div>
-  );
-}
-
-function Setup({onComplete}){
-  const [name,setName]=useState("");
-  const [subjects,setSubjects]=useState("");
-  const [context,setContext]=useState("");
-  return(
-    <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui,sans-serif"}}>
-      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"32px 28px",width:"100%",maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
-        <div><div style={{color:C.accent,fontSize:11,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Coach</div><div style={{color:C.text,fontSize:18,fontWeight:700}}>Let's get started.</div><div style={{color:C.textMid,fontSize:12,marginTop:6,lineHeight:1.7}}>The coach will observe you for 7 days before building your schedule. Check in daily — it does the rest.</div></div>
-        <div><label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Your name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Name" autoFocus style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>
-        <div><label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Subjects / areas of work</label><input value={subjects} onChange={e=>setSubjects(e.target.value)} placeholder="e.g. Calculus, Linear Algebra, Stats" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>
-        <div><label style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase",display:"block",marginBottom:5}}>Anything the coach should know upfront</label><input value={context} onChange={e=>setContext(e.target.value)} placeholder="e.g. work Tues/Thurs, bad sleep habits, phone addiction" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"9px 12px",fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>
-        <button onClick={()=>{if(!name.trim())return;onComplete({name:name.trim(),subjects:subjects.split(",").map(s=>s.trim()).filter(Boolean),context,appMode:"observing",streak:0,habits:[],fixedEvents:[],bedrockBlocks:null,examMode:null,setupDate:todayStr()});}} style={{background:C.accent,color:"#000",border:"none",borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",marginTop:4}}>Begin →</button>
-      </div>
-    </div>
-  );
-}
-
-function ObservationScreen({profile,observations,onUpdate}){
-  const numDays=(observations||[]).length;
-  const ready=numDays>=7;
-  const hr=new Date().getHours();
-  const isAft=hr>=12&&hr<20;
-  const isEve=hr>=20;
-  const todayObs=(observations||[]).find(o=>o.date===todayStr());
-  const hasMorning=!!(todayObs&&todayObs.wakeTime);
-  const hasAft=!!(todayObs&&todayObs.afternoonDone);
-  const hasEve=!!(todayObs&&todayObs.sleepTime);
-
-  const [messages,setMessages]=useState([]);
-  const [input,setInput]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [showCheckin,setShowCheckin]=useState(false);
-  const [checkinType,setCheckinType]=useState("morning");
-  const [analyzing,setAnalyzing]=useState(false);
-  const feedRef=useRef(null);
-  const conv=useRef([]);
-
-  useEffect(()=>{if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;},[messages,loading]);
-  useEffect(()=>{
-    const greeting=ready
-      ?"I've been watching for "+numDays+" days. I have enough data to build your schedule. Ready when you are."
-      :"Day "+numDays+" of observation. "+(hasMorning&&!hasEve?"Morning logged. Check in tonight.":!hasMorning?"Check in below — 30 seconds.":"All check-ins done. See you tomorrow.");
-    setMessages([{role:"ai",text:greeting}]);
-  },[]);
-
-  async function handleCheckin(data){
-    setShowCheckin(false);
-    const existing=(observations||[]).find(o=>o.date===todayStr())||{date:todayStr()};
-    const merged={...existing,...data};
-    if(data.type==="afternoon")merged.afternoonDone=true;
-    const newObs=[...(observations||[]).filter(o=>o.date!==todayStr()),merged];
-    await sSet(SK.observations,newObs);
-    onUpdate({observations:newObs});
-    const msg=data.type==="morning"?"Morning logged. Energy "+data.energy+"/5. See you this afternoon."
-      :data.type==="afternoon"?"Afternoon logged. Energy "+data.energy+"/5."
-      :"Evening logged. Rest well.";
-    setMessages(m=>[...m,{role:"ai",text:msg}]);
-  }
-
-  async function applyBedrock(json){
-    try{
-      const b=JSON.parse(json.trim());
-      const updated={...profile,...b,appMode:"active",activeSince:todayStr()};
-      await sSet(SK.profile,updated);
-      onUpdate({profile:updated,observations:observations||[],appMode:"active"});
-    }catch(e){
-      console.error("bedrock parse",e);
-      setMessages(m=>[...m,{role:"ai",text:"Failed to save. Try again."}]);
-      setAnalyzing(false);
-    }
-  }
-
-  async function runAnalysis(){
-    setAnalyzing(true);
-    setMessages(m=>[...m,{role:"ai",text:"Analysing "+numDays+" days of data…"}]);
-    try{
-      const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations||[]),messages:[{role:"user",content:"Analyse my data and propose my bedrock schedule."}]})});
-      const d=await r.json();
-      const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
-      conv.current=[{role:"user",content:"Analyse my data and propose my bedrock schedule."},{role:"assistant",content:raw}];
-      const bm=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
-      if(bm){await applyBedrock(bm[1]);return;}
-      setMessages(m=>[...m.filter(x=>x.text!=="Analysing "+numDays+" days of data…"),{role:"ai",text:raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim()}]);
-    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Analysis failed. Try again."}]);}
-    setAnalyzing(false);
-  }
-
-  async function send(){
-    if(!input.trim()||loading||analyzing)return;
-    const msg=input.trim();setInput("");
-    setMessages(m=>[...m,{role:"user",text:msg}]);
-    conv.current=[...conv.current,{role:"user",content:msg}];
-    if(msg.toLowerCase().match(/ready|build|go ahead|looks good|all good|seems good|confirmed|yes|good/)){
-      setAnalyzing(true);
-      try{
-        const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:buildAnalysisPrompt(profile,observations||[]),messages:conv.current})});
-        const d=await r.json();
-        const raw=d.content?d.content.map(c=>c.text||"").join(""):"";
-        conv.current=[...conv.current,{role:"assistant",content:raw}];
-        const bm=raw.match(/<BEDROCK>([\s\S]*?)<\/BEDROCK>/);
-        if(bm){await applyBedrock(bm[1]);return;}
-        setMessages(m=>[...m,{role:"ai",text:raw.replace(/<BEDROCK>[\s\S]*?<\/BEDROCK>/g,"").trim()}]);
-      }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
-      setAnalyzing(false);return;
-    }
-    setLoading(true);
-    try{
-      const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:"Accountability coach in observation mode for "+profile.name+". Days observed: "+numDays+"/7. Brief responses only.",message:msg})});
-      const d=await r.json();
-      setMessages(m=>[...m,{role:"ai",text:d.content||"Talk to me."}]);
-    }catch(e){setMessages(m=>[...m,{role:"ai",text:"Error."}]);}
-    setLoading(false);
-  }
-
-  return(
-    <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="observing" mode={getMode()} numDays={numDays} streak={0} examMode={null}/>
-      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
-        <SchedulePanel blocks={[]} appMode="observing"/>
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"flex",flexDirection:"column",gap:12}}>
-            {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
-            {(loading||analyzing)&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
-            {showCheckin&&<CheckIn onSubmit={handleCheckin} type={checkinType}/>}
-            {!showCheckin&&(
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {!hasMorning&&<button onClick={()=>{setCheckinType("morning");setShowCheckin(true);}} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
-                {hasMorning&&!hasAft&&isAft&&<button onClick={()=>{setCheckinType("afternoon");setShowCheckin(true);}} style={{background:"#0a0e14",border:"1px solid #1a2a3a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8aaa",cursor:"pointer"}}>Afternoon check-in</button>}
-                {hasMorning&&!hasEve&&isEve&&<button onClick={()=>{setCheckinType("evening");setShowCheckin(true);}} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
-                {ready&&!analyzing&&<button onClick={runAnalysis} style={{background:C.accent,border:"none",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#000",fontWeight:700,cursor:"pointer"}}>Build my schedule →</button>}
-              </div>
-            )}
-          </div>
-          <InputBar value={input} onChange={setInput} onSend={send} disabled={loading||analyzing} placeholder="Talk to your coach…"/>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ActiveScreen({profile:initProfile,observations:initObs}){
-  const [profile,setProfile]=useState(initProfile);
-  const [observations,setObservations]=useState(initObs||[]);
-  const [schedule,setSchedule]=useState([]);
-  const [log,setLog]=useState([]);
-  const [messages,setMessages]=useState([]);
-  const [input,setInput]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [mode,setMode]=useState(getMode());
-  const [auditStarted,setAuditStarted]=useState(false);
-  const [showCheckin,setShowCheckin]=useState(false);
-  const feedRef=useRef(null);
-  const conv=useRef([]);
-
-  useEffect(()=>{const t=setInterval(()=>setMode(getMode()),60000);return()=>clearInterval(t);},[]);
-  useEffect(()=>{if(feedRef.current)feedRef.current.scrollTop=feedRef.current.scrollHeight;},[messages,loading]);
-
-  useEffect(()=>{
-    Promise.all([sGet(SK.schedule),sGet(SK.log)]).then(([s,l])=>{
-      if(l)setLog(l);
-      const targetDate=isLateNight()?tomorrowStr():todayStr();
-      const hasSchedule=s&&s.date===targetDate&&s.blocks&&s.blocks.length;
-      if(hasSchedule){setSchedule(s.blocks);setMessages([{role:"ai",text:"Schedule loaded. "+timeStr()+" — "+getCurrentBlockMsg(s.blocks)}]);}
-      else{autoBuild(l||[]);}
-    });
-  },[]);
-
-  function getCurrentBlockMsg(blocks){
-    const ci=getCurIdx(blocks);
-    if(ci<0)return "Nothing scheduled yet.";
-    const cur=blocks[ci];const next=blocks[ci+1];
-    return "You should be: "+cur.title+(next?". Up next: "+next.title:".");
-  }
-
-  async function saveProfile(p){setProfile(p);await sSet(SK.profile,p);}
-
-  async function claudeCall(msgs,sys){
-    const body={model:"claude-sonnet-4-5",max_tokens:2000,messages:msgs};
-    if(sys)body.system=sys;
-    const r=await fetch(CLAUDE_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const d=await r.json();
-    return d.content?d.content.map(c=>c.text||"").join(""):"";
-  }
-
-  async function autoBuild(existingLog){
-    setLoading(true);
-    const late=isLateNight();
-    setMessages([{role:"ai",text:late?"Building tomorrow's schedule…":"Building your schedule…"}]);
-    try{
-      const prompt=late?"Build tomorrow's schedule. Date: "+new Date(tomorrowStr()).toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"})+". Start from my wake time. Full day.":"Build today's schedule. Time: "+timeStr()+". Date: "+dateStr()+". Start from now until sleep.";
-      const raw=await claudeCall([{role:"user",content:prompt}],buildDayPrompt(profile,observations,existingLog));
-      const sm=raw.match(/<SCHEDULE>([\s\S]*?)<\/SCHEDULE>/);
-      const targetDate=late?tomorrowStr():todayStr();
-      if(sm){try{const bl=JSON.parse(sm[1].trim());setSchedule(bl);await sSet(SK.schedule,{date:targetDate,blocks:bl});}catch(e){console.error(e);}}
-      const clean=raw.replace(/<SCHEDULE>[\s\S]*?<\/SCHEDULE>/g,"").trim();
-      setMessages([{role:"ai",text:clean||(late?"Tomorrow is set.":"Schedule built. Stay on it.")}]);
-    }catch(e){console.error(e);setMessages([{role:"ai",text:"Failed to build. Talk to me."}]);}
-    setLoading(false);
-  }
-
-  async function triggerAudit(el,es){
-    setAuditStarted(true);setLoading(true);
-    try{
-      const raw=await claudeCall([{role:"user",content:"Run the evening audit."}],buildAuditPrompt(profile,el,es,observations));
-      conv.current=[{role:"user",content:"Run the evening audit."},{role:"assistant",content:raw}];
-      setMessages([{role:"ai",text:raw.replace(/<AUDIT>[\s\S]*?<\/AUDIT>/g,"").trim()}]);
-    }catch(e){setMessages([{role:"ai",text:"Audit failed. Report manually."}]);}
-    setLoading(false);
-  }
-
-  async function handleCheckin(data){
-    setShowCheckin(false);
-    const existing=observations.find(o=>o.date===todayStr())||{date:todayStr()};
-    const merged={...existing,...data};
-    if(data.type==="afternoon"){
-      merged.afternoonDone=true;
-      if(data.onTrack!=="Yes, on track"){
-        setTimeout(()=>autoBuild(log),300);
-      }
-    }
-    const newObs=[...observations.filter(o=>o.date!==todayStr()),merged];
-    setObservations(newObs);
-    await sSet(SK.observations,newObs);
-    const msg=data.type==="morning"?"Morning logged. Energy "+data.energy+"/5."
-      :data.type==="afternoon"?"Afternoon logged."+(data.onTrack!=="Yes, on track"?" Readjusting your schedule…":"")
-      :"Evening logged. Rest well.";
-    setMessages(m=>[...m,{role:"ai",text:msg}]);
-  }
-
-  async function send(){
-    if(!input.trim()||loading)return;
-    const msg=input.trim();setInput("");
-    setMessages(m=>[...m,{role:"user",text:msg}]);
-    conv.current=[...conv.current,{role:"user",content:msg}];
-    setLoading(true);
-    try{
-      if(mode==="audit"||auditStarted){
-        const raw=await claudeCall(conv.current,buildAuditPrompt(profile,log,schedule,observations));
-        conv.current=[...conv.current,{role:"assistant",content:raw}];
-        const am=raw.match(/<AUDIT>([\s\S]*?)<\/AUDIT>/);
-        if(am){
-          try{
-            const entry=JSON.parse(am[1].trim());
-            const nl=[...log,entry];setLog(nl);await sSet(SK.log,nl);
-            const allGood=entry.completed>=entry.total&&entry.punishments===0;
-            const np={...profile,streak:allGood?(profile.streak||0)+1:0};
-            if(entry.wakeTime||entry.sleepTime){
-              const newObs=[...observations.filter(o=>o.date!==todayStr()),{date:todayStr(),wakeTime:entry.wakeTime||"",sleepTime:entry.sleepTime||"",energy:entry.energy||3,chaosLevel:entry.chaosLevel||3,notes:entry.notes||""}];
-              setObservations(newObs);await sSet(SK.observations,newObs);
-            }
-            if(entry.habitUpdates&&entry.habitUpdates.length){
-              np.habits=(np.habits||[]).map(h=>{
-                const u=entry.habitUpdates.find(x=>x.name===h.name);
-                if(!u)return h;
-                if(u.hit){const s=(h.streak||0)+1;return {...h,streak:s,target:s%3===0?String(Math.round(parseFloat(h.target)*0.85*10)/10):h.target};}
-                return {...h,streak:0,target:h.baseline};
-              });
-            }
-            await saveProfile(np);
-          }catch(e){console.error(e);}
-        }
-        setMessages(m=>[...m,{role:"ai",text:raw.replace(/<AUDIT>[\s\S]*?<\/AUDIT>/g,"").trim()}]);
-      } else {
-        const r=await fetch(GROQ_API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:buildCoachPrompt(profile,schedule,observations),message:msg})});
-        const d=await r.json();
-        const raw=d.content||"";
-        const np={...profile};let changed=false;
-        const pu=raw.match(/PROFILE_UPDATE:(\{[^}]*\})/);
-        if(pu){try{const u=JSON.parse(pu[1]);if(u.fixedEvents)np.fixedEvents=[...(np.fixedEvents||[]),...u.fixedEvents];if(u.notes)np.notes=(np.notes||"")+". "+u.notes;changed=true;}catch(e){console.error(e);}}
-        const em=raw.match(/EXAM_MODE:(\{[^}]+\})/);
-        if(em){try{np.examMode=JSON.parse(em[1]);changed=true;}catch(e){console.error(e);}}
-        const hh=raw.match(/HABIT_HIT:(\S+)/),hm=raw.match(/HABIT_MISS:(\S+)/);
-        if(hh||hm){np.habits=(np.habits||[]).map(h=>{if(hh&&h.name.toLowerCase().includes(hh[1].toLowerCase())){const s=(h.streak||0)+1;return {...h,streak:s};}if(hm&&h.name.toLowerCase().includes(hm[1].toLowerCase()))return {...h,streak:0,target:h.baseline};return h;});changed=true;}
-        if(changed)await saveProfile(np);
-        if(raw.includes("REBUILD_NEEDED")){conv.current=[];await sSet(SK.schedule,{date:isLateNight()?tomorrowStr():todayStr(),blocks:[]});setMessages(m=>[...m,{role:"ai",text:"Rebuilding…"}]);setLoading(false);await autoBuild(log);return;}
-        const upd=raw.match(/SCHEDULE_UPDATE:(\{[^}]+\})/);
-        if(upd){try{const o=JSON.parse(upd[1]);const nb=schedule.map((b,i)=>i===o.index?{...b,...o}:b);setSchedule(nb);await sSet(SK.schedule,{date:isLateNight()?tomorrowStr():todayStr(),blocks:nb});}catch(e){console.error(e);}}
-        const clean=raw.replace(/SCHEDULE_UPDATE:[^\n]*/g,"").replace(/PROFILE_UPDATE:[^\n]*/g,"").replace(/EXAM_MODE:[^\n]*/g,"").replace(/HABIT_HIT:\S+|HABIT_MISS:\S+|REBUILD_NEEDED/g,"").trim();
-        if(clean)setMessages(m=>[...m,{role:"ai",text:clean}]);
-      }
-    }catch(e){console.error(e);setMessages(m=>[...m,{role:"ai",text:"Error. Try again."}]);}
-    setLoading(false);
-  }
-
-  const todayObs=observations.find(o=>o.date===todayStr());
-  const hasMorningA=!!(todayObs&&todayObs.wakeTime);
-  const hasAftA=!!(todayObs&&todayObs.afternoonDone);
-  const hasEveA=!!(todayObs&&todayObs.sleepTime);
-  const aHr=new Date().getHours();
-  const ph=mode==="audit"?"Report in…":"Talk to your coach…";
-
-  return(
-    <div style={{height:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
-      <Header appMode="active" mode={mode} numDays={0} streak={profile.streak||0} examMode={profile.examMode||null}/>
-      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
-        <SchedulePanel blocks={schedule} appMode="active"/>
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          <div ref={feedRef} style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"flex",flexDirection:"column",gap:12}}>
-            {!messages.length&&<div style={{margin:"auto",textAlign:"center",color:C.textFaint,fontSize:12,lineHeight:1.8}}>Your coach is ready.</div>}
-            {messages.map((m,i)=><MessageBubble key={i} msg={m}/>)}
-            {loading&&<div style={{alignSelf:"flex-start"}}><div style={{color:C.accentDim,fontSize:9,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Coach</div><div style={{background:C.surface,border:"1px solid "+C.border,color:C.textMid,fontSize:13,padding:"10px 14px",borderRadius:"8px 8px 8px 2px"}}>…</div></div>}
-            {showCheckin&&<CheckIn onSubmit={handleCheckin} type={aHr<12?"morning":aHr<20?"afternoon":"evening"}/>}
-            {!showCheckin&&(
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {!hasMorningA&&aHr<12&&<button onClick={()=>setShowCheckin(true)} style={{background:C.accentFaint,border:"1px solid "+C.accentDim,borderRadius:6,padding:"8px 14px",fontSize:12,color:C.accent,cursor:"pointer"}}>Morning check-in</button>}
-                {hasMorningA&&!hasAftA&&aHr>=12&&aHr<20&&<button onClick={()=>setShowCheckin(true)} style={{background:"#0a0e14",border:"1px solid #1a2a3a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8aaa",cursor:"pointer"}}>Afternoon check-in</button>}
-                {hasMorningA&&!hasEveA&&aHr>=20&&<button onClick={()=>setShowCheckin(true)} style={{background:"#0a120a",border:"1px solid #1a3a1a",borderRadius:6,padding:"8px 14px",fontSize:12,color:"#4a8a4a",cursor:"pointer"}}>Evening report</button>}
-              </div>
-            )}
-          </div>
-          <InputBar value={input} onChange={setInput} onSend={send} disabled={loading} placeholder={ph}/>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function App(){
-  const [state,setState]=useState(null);
-  useEffect(()=>{
-    Promise.all([sGet(SK.profile),sGet(SK.observations)]).then(([p,o])=>{
-      if(!p)setState({appMode:"setup"});
-      else setState({profile:p,observations:o||[],appMode:p.appMode||"observing"});
-    });
-  },[]);
-  async function handleSetup(p){await sSet(SK.profile,p);setState({profile:p,observations:[],appMode:"observing"});}
-  function handleObsUpdate({observations,profile,appMode}){setState(s=>({...s,observations:observations||s.observations,profile:profile||s.profile,appMode:appMode||s.appMode}));}
-  if(state===null)return <div style={{height:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.textDim,fontSize:10,letterSpacing:2,textTransform:"uppercase"}}>Loading…</div></div>;
-  if(state.appMode==="setup")return <Setup onComplete={handleSetup}/>;
-  if(state.appMode==="observing")return <ObservationScreen profile={state.profile} observations={state.observations} onUpdate={handleObsUpdate}/>;
-  return <ActiveScreen profile={state.profile} observations={state.observations}/>;
 }
