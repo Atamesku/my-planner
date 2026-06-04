@@ -27,8 +27,8 @@ const PROFILE = {
     'Activation energy — cannot start tasks',
     'Motivation collapses after initial burst',
     'Doom-scrolling & phone compulsion',
-    'Shift work fatigue and circadian disruption',
-    'Unpredictable schedule making consistency hard',
+    'Unstructured free time gets wasted (Mon–Fri are open days with no external accountability)',
+    'Difficulty maintaining consistency without external structure',
   ],
 };
 
@@ -53,8 +53,8 @@ The brain operates in ~90-minute cycles of alertness and recovery (ultradian rhy
 SLEEP & MEMORY CONSOLIDATION:
 During slow-wave sleep (SWS), the hippocampus replays learned material to the neocortex (memory consolidation, Stickgold & Walker, 2005). Sleeping under 7 hours reduces declarative memory encoding by up to 40% the following day (Walker, 2017). For a student: sleep IS studying. Non-negotiable.
 
-CORTISOL AWAKENING RESPONSE & SHIFT WORK:
-Shift work destroys the cortisol awakening response (CAR) — the cortisol spike in the first 30 minutes of waking that drives motivation, alertness, and cognitive readiness. The single most powerful fix: anchor wake time. Same wake-up time every day regardless of shift. This re-entrains the circadian clock faster than any other intervention (Czeisler et al., 1989).
+UNSTRUCTURED TIME & PARKINSON'S LAW:
+Parkinson's Law: work expands to fill the time available. Mon–Fri are fully open days with zero external accountability — this is psychologically harder than shift work, not easier. Without imposed structure, the brain defaults to the path of least resistance (dopamine-seeking behaviors: phone, YouTube, staying in bed). The fix is self-imposed time pressure and artificial constraints. Time-blocking transforms open days into a schedule with the same psychological force as an external obligation. A student with total freedom and no discipline will outperform no one. A student who treats Mon–Fri like a structured job will outperform almost everyone.
 
 PREFRONTAL CORTEX DEPLETION:
 The PFC — governing impulse control, deep work, planning, and willpower — is most active in the early waking hours and depletes with every decision and effort throughout the day (Baumeister, 2007). Cognitive heavy lifting must come FIRST in the day. Placing it last guarantees failure.
@@ -119,10 +119,10 @@ const SCHEDULE_SCHEMA = `Return ONLY a valid JSON object matching this exact str
   "dailyHabits": [
     { "id": "h1", "name": "short habit name", "emoji": "single emoji", "category": "sleep|study|health|focus|digital" }
   ],
-  "shiftDaySchedule": [
+  "saturdaySchedule": [
     { "block": "Wake+0", "label": "activity name", "duration": "—", "type": "anchor", "note": "brief science-backed note" }
   ],
-  "offDaySchedule": [
+  "weekdaySchedule": [
     { "block": "Wake+0", "label": "activity name", "duration": "Xmin", "type": "anchor|study|health|meal|recovery|digital-free|sleep", "note": "brief note" }
   ],
   "studyStrategy": "2-3 sentence study approach for this week",
@@ -284,7 +284,7 @@ export default function AxiomApp() {
     const isFirst = n === 1;
 
     const prompt = isFirst
-      ? `Generate the Week 1 foundation schedule.\n${SCHEDULE_SCHEMA}\n\nCONSTRAINTS:\n- Include exactly 5-6 daily habits.\n- Shift day: 6-8 blocks (work takes most of the day; be realistic).\n- Off day: 10-13 blocks (full structure, more study time).\n- Week 1 is FOUNDATION ONLY — minimum viable protocol. The study target is ONE Pomodoro (25 min) per day. Win small first. Build momentum before adding volume.\n- Keep block notes under 12 words each.`
+      ? `Generate the Week 1 foundation schedule.\n${SCHEDULE_SCHEMA}\n\nCONSTRAINTS:\n- Include exactly 5-6 daily habits.\n- Saturday protocol: 6-8 blocks. Work starts 11:30am (factor in commute). The ONLY study window is the morning before leaving. Keep it tight and realistic.\n- Weekday protocol (Mon-Fri): 12-14 blocks. These are fully open days — this is where the academic work gets done. Structure them like a job. Apply Parkinson's Law: give every hour a job.\n- Week 1 is FOUNDATION ONLY — minimum viable protocol. The study target is ONE Pomodoro (25 min) per day. Win small first. Build momentum before adding volume.\n- Keep block notes under 12 words each.`
       : `Week ${n - 1} review data:\n- Overall rating: ${reviewData.rating}/5\n- What worked: "${reviewData.wins}"\n- What failed: "${reviewData.struggles}"\n- Additional context: "${reviewData.notes}"\n\nGenerate Week ${n} adjusted schedule.\n${SCHEDULE_SCHEMA.replace('NUMBER', n)}\n\nADJUSTMENT LOGIC:\n- Rating 1-2: Simplify significantly. Remove 1-2 habits. Reduce off-day blocks. The system was too demanding.\n- Rating 3: Minor tweaks. Adjust 1-2 habits. Small difficulty increase in one area.\n- Rating 4-5: Add measured challenge. Increase study target by 1 Pomodoro. Add one new habit.\n- In coachIntro: directly reference what happened in Week ${n - 1} and why these specific adjustments are being made. Be analytical and specific.`;
 
     try {
@@ -483,7 +483,7 @@ export default function AxiomApp() {
 
             {/* Sub-tab pills */}
             <div style={{ display: 'flex', gap: 5, marginBottom: 16, padding: 4, background: C.card, borderRadius: 10, border: `1px solid ${C.border}` }}>
-              {[['rules', 'RULES'], ['shift', 'SHIFT'], ['off', 'OFF DAY'], ['study', 'STUDY']].map(([id, lbl]) => (
+              {[['rules', 'RULES'], ['saturday', 'SATURDAY'], ['weekday', 'MON–FRI'], ['study', 'STUDY']].map(([id, lbl]) => (
                 <button key={id} onClick={() => setStab(id)} style={{ flex: 1, padding: '7px 3px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: 1, background: stab === id ? C.a : 'transparent', color: stab === id ? '#fff' : C.mut, transition: 'all .15s', fontFamily: 'var(--font-mono)' }}>
                   {lbl}
                 </button>
@@ -501,12 +501,12 @@ export default function AxiomApp() {
             ))}
 
             {/* Shift / Off-day schedule sub-tabs */}
-            {(stab === 'shift' || stab === 'off') && (() => {
-              const blocks = stab === 'shift' ? sched.shiftDaySchedule : sched.offDaySchedule;
+            {(stab === 'saturday' || stab === 'weekday') && (() => {
+              const blocks = stab === 'saturday' ? sched.saturdaySchedule : sched.weekdaySchedule;
               return (
                 <div>
                   <div style={{ fontSize: 10, color: C.mut, textAlign: 'center', letterSpacing: 2, marginBottom: 14, fontFamily: 'var(--font-mono)' }}>
-                    {stab === 'shift' ? '⚙ WORKING SHIFT — Minimum viable protocol' : '📚 DAY OFF — Full structure. No exceptions.'}
+                    {stab === 'saturday' ? '📅 SATURDAY — Work day. Morning is your only window.' : '📚 MON–FRI — Full study day. Treat it like a job.'}
                   </div>
                   {(blocks || []).map((b, i) => (
                     <div key={i} style={{ display: 'flex', background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 9, overflow: 'hidden' }}>
@@ -697,7 +697,7 @@ export default function AxiomApp() {
             {[
               { k: 'wins',      lbl: 'WHAT WORKED?',                   ph: 'Habits held, study sessions done, unexpected wins...' },
               { k: 'struggles', lbl: 'WHAT FELL APART?',               ph: 'Specific failures, what derailed you, skipped habits...' },
-              { k: 'notes',     lbl: 'WHAT SHOULD AXIOM FACTOR IN?',   ph: 'Shift changes, life events, sleep quality, mental state...' },
+              { k: 'notes',     lbl: 'WHAT SHOULD AXIOM FACTOR IN?',   ph: 'Life events, sleep quality, Saturday shift, upcoming exams, mental state...' },
             ].map(({ k, lbl, ph }) => (
               <div key={k} style={cardS()}>
                 <div style={lblS()}>{lbl}</div>
