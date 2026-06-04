@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // To update: edit the fields below and redeploy.
 // ═══════════════════════════════════════════════════════════════
 const PROFILE = {
-  situation: 'Working + studying — shift work with irregular hours',
+  situation: 'Full-time student with a fixed Saturday work commitment (11:30am–9:15pm including commute). Weekday availability fluctuates based on class schedule and other activities.',
   studyLoad: '3-4 subjects, moderate',
   sleep: '6-7 hours, inconsistent',
   badHabits: [
